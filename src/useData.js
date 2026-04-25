@@ -1,3 +1,4 @@
+
 import { useState, useEffect, useCallback } from 'react'
 import { supabase } from './supabase'
 import { mkInitials, fmtShort, CHEF_ID, CATEGORIES } from './constants'
