@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react'
+import { useState, useCallback, useMemo } from 'react'
 import LoginScreen from './LoginScreen'
 import useData from './useData'
 import { S } from './styles'
@@ -7,21 +7,41 @@ import { CATEGORIES, CHEF_ID, WD, SHIFT_TEMPLATES, getMonday, addDays, toDS, fmt
 const notifIcon  = t => ({ application:'📬', assigned:'🎉', new_shift:'📋' }[t] || '🔔')
 const notifColor = t => ({ application:'#C8960A', assigned:'#2A9D6E', new_shift:'#6B8FB5' }[t] || '#888')
 
-/* ─── tiny helpers ─── */
-const CatPills = ({ value, onChange }) => (
+/* ── Category pills — supports multi-select ── */
+const CatPills = ({ value, onChange, multi = false }) => (
   <div style={S.catSelect}>
-    {Object.entries(CATEGORIES).map(([k, v]) => (
-      <button key={k} style={value === k ? { ...S.catBtn, background: v.color+'33', border:`1px solid ${v.color}`, color: v.color } : S.catBtn}
-        onClick={() => onChange(k)}>{v.icon} {v.label}</button>
-    ))}
+    {Object.entries(CATEGORIES).map(([k, v]) => {
+      const active = multi ? (Array.isArray(value) && value.includes(k)) : value === k
+      return (
+        <button key={k}
+          style={active ? { ...S.catBtn, background: v.color+'33', border:`1px solid ${v.color}`, color: v.color } : S.catBtn}
+          onClick={() => {
+            if (!multi) { onChange(k); return }
+            const arr = Array.isArray(value) ? value : []
+            onChange(active ? arr.filter(x => x !== k) : [...arr, k])
+          }}>
+          {v.icon} {v.label}
+        </button>
+      )
+    })}
   </div>
+)
+
+/* ── Controlled input that doesn't lose focus ── */
+const Input = ({ value, onChange, type = 'text', placeholder, style }) => (
+  <input
+    style={{ ...S.input, ...style }}
+    type={type}
+    placeholder={placeholder}
+    value={value}
+    onChange={e => onChange(e.target.value)}
+  />
 )
 
 export default function App() {
   const [currentAccount, setCurrentAccount] = useState(null)
   const db = useData()
 
-  /* ui */
   const [chefTab,    setChefTab]    = useState('liste')
   const [chefSubTab, setChefSubTab] = useState('schichten')
   const [mitTab,     setMitTab]     = useState('liste')
@@ -32,28 +52,26 @@ export default function App() {
   const [calMit,  setCalMit]  = useState(getMonday(new Date()))
   const [filterCat,  setFilterCat]  = useState('all')
   const [filterRoom, setFilterRoom] = useState('all')
+  const [showOnlyFuture, setShowOnlyFuture] = useState(true)
 
-  /* modals */
   const [showBulkShift,   setShowBulkShift]   = useState(false)
   const [showManageRooms, setShowManageRooms] = useState(false)
   const [showAddAccount,  setShowAddAccount]  = useState(false)
   const [editAccount,     setEditAccount]     = useState(null)
-  const [editShift,       setEditShift]       = useState(null)  // shift being edited
+  const [editShift,       setEditShift]       = useState(null)
 
-  /* forms */
   const [bulkForm, setBulkForm] = useState({
-    date: '', template: 'ala_carte', customLabel: '', time: '17:00 – 23:00', room: '',
-    counts: { theke: 0, service: 0, runner: 0 },
+    date:'', template:'ala_carte', customLabel:'', time:'17:00 – 23:00', room:'',
+    counts: Object.fromEntries(Object.keys(CATEGORIES).map(k => [k, 0])),
   })
   const [newRoomName, setNewRoomName] = useState('')
   const [newRoomIcon, setNewRoomIcon] = useState('🏠')
-  const [newAccForm,  setNewAccForm]  = useState({ name:'', password:'', email:'', role:'employee', category:'service' })
+  const [newAccForm,  setNewAccForm]  = useState({ name:'', password:'', email:'', role:'employee', categories:['service'] })
   const [accError,    setAccError]    = useState('')
   const [toast, setToast] = useState(null)
 
-  const showToast = msg => { setToast(msg); setTimeout(() => setToast(null), 2500) }
+  const showToast = useCallback(msg => { setToast(msg); setTimeout(() => setToast(null), 2500) }, [])
 
-  /* derived */
   const isChef         = currentAccount?.role === 'chef'
   const activeEmployee = db.employees.find(e => e.id === currentAccount?.employeeId)
   const currentRecipient = isChef ? CHEF_ID : currentAccount?.employeeId
@@ -62,50 +80,51 @@ export default function App() {
   const getRoom = id => db.rooms.find(r => r.id === id)
   const getEmp  = id => db.employees.find(e => e.id === id)
 
-  const filtered = db.shifts.filter(s =>
-    (filterCat  === 'all' || s.category === filterCat) &&
-    (filterRoom === 'all' || s.room     === filterRoom)
-  )
+  const today = toDS(new Date())
 
-  /* ── PDF EXPORT ── */
+  // Filtered + grouped shifts for chef list view
+  const groupedShifts = useMemo(() => {
+    let list = db.shifts.filter(s =>
+      (filterCat  === 'all' || s.category === filterCat) &&
+      (filterRoom === 'all' || s.room     === filterRoom) &&
+      (!showOnlyFuture || s.date >= today)
+    )
+    // group by date
+    const groups = {}
+    list.forEach(s => {
+      if (!groups[s.date]) groups[s.date] = []
+      groups[s.date].push(s)
+    })
+    return Object.entries(groups).sort(([a],[b]) => a.localeCompare(b))
+  }, [db.shifts, filterCat, filterRoom, showOnlyFuture, today])
+
+  // Employee's categories
+  const empCategories = activeEmployee?.categories || []
+
+  /* ── PDF Export ── */
   const exportPDF = () => {
-    const week = Array.from({ length:7 }, (_,i) => addDays(calChef, i))
+    const week = Array.from({ length:7 }, (_,i) => addDays(calChef,i))
     const rows = week.map(day => {
       const ds = toDS(day)
       const dayShifts = db.shifts.filter(s => s.date === ds)
-      return `<tr>
-        <td style="padding:8px;border:1px solid #ddd;font-weight:bold">${day.toLocaleDateString('de-DE',{weekday:'short',day:'2-digit',month:'2-digit'})}</td>
+      return `<tr><td style="padding:8px;border:1px solid #ddd;font-weight:bold">${day.toLocaleDateString('de-DE',{weekday:'short',day:'2-digit',month:'2-digit'})}</td>
         <td style="padding:8px;border:1px solid #ddd">${dayShifts.map(s => {
           const cat = CATEGORIES[s.category]
           const emp = s.assigned ? getEmp(s.assigned)?.name : '—'
           return `${cat.icon} ${s.label} (${s.time}) · ${cat.label}${emp !== '—' ? ` · ${emp}` : ''}`
-        }).join('<br>') || '—'}</td>
-      </tr>`
+        }).join('<br>') || '—'}</td></tr>`
     }).join('')
-
-    const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Schichtplan</title>
-    <style>body{font-family:Georgia,serif;padding:20px}h1{color:#C8960A}table{width:100%;border-collapse:collapse}td{vertical-align:top}</style>
-    </head><body>
-    <h1>🍴 SchichtPlan</h1>
-    <p>Woche: ${week[0].toLocaleDateString('de-DE',{day:'2-digit',month:'long'})} – ${week[6].toLocaleDateString('de-DE',{day:'2-digit',month:'long',year:'numeric'})}</p>
-    <table>${rows}</table></body></html>`
-
-    const blob = new Blob([html], { type:'text/html' })
-    const url  = URL.createObjectURL(blob)
-    const a    = document.createElement('a')
-    a.href = url; a.download = 'schichtplan.html'; a.click()
-    URL.revokeObjectURL(url)
+    const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Schichtplan</title><style>body{font-family:Georgia,serif;padding:20px}h1{color:#C8960A}table{width:100%;border-collapse:collapse}td{vertical-align:top}</style></head><body><h1>🍴 SchichtPlan</h1><table>${rows}</table></body></html>`
+    const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(new Blob([html],{type:'text/html'})), download:'schichtplan.html' })
+    a.click()
     showToast('Wochenplan exportiert ✓')
   }
 
-  /* loading / error */
   if (db.loading) return <div style={S.spinner}><div style={S.spinnerIcon}>🍴</div><div style={S.spinnerText}>Wird geladen…</div></div>
-  if (db.error)   return <div style={S.spinner}><div style={{fontSize:36}}>⚠️</div><div style={{fontSize:16,fontWeight:700}}>Verbindungsfehler</div><div style={{fontSize:13,color:'#aaa',maxWidth:320,textAlign:'center'}}>{db.error}</div></div>
+  if (db.error)   return <div style={S.spinner}><div style={{fontSize:36}}>⚠️</div><div style={{fontSize:16,fontWeight:700}}>Verbindungsfehler</div><div style={{fontSize:13,color:'#aaa',maxWidth:320,textAlign:'center'}}>{db.error}</div><div style={{fontSize:12,color:'#bbb'}}>Supabase-URL und API-Key prüfen.</div></div>
   if (!currentAccount) return <LoginScreen onLogin={async (name, pw) => setCurrentAccount(await db.login(name, pw))} />
 
-  /* ═════════════════════════════════════════
-     SHIFT CARD
-  ═════════════════════════════════════════ */
+  /* ═══════════ SHIFT CARD ═══════════ */
   const ShiftCard = ({ shift, cardIsChef=false, isEmployee=false }) => {
     const live       = db.shifts.find(s => s.id === shift.id) || shift
     const cat        = CATEGORIES[live.category]
@@ -113,24 +132,26 @@ export default function App() {
     const room       = getRoom(live.room)
     const hasApplied = live.applicants.includes(activeEmployee?.id)
     const editing    = editingRoomSid === live.id
-    const tmpl       = SHIFT_TEMPLATES.find(t => t.label === live.label)
+
+    // Check if any applicant is unavailable on this date
+    const unavailApplicants = live.applicants.filter(eid =>
+      db.unavailable.some(u => u.employeeId === eid && u.date === live.date)
+    )
 
     return (
       <div style={{ ...S.shiftCard, borderTop:`3px solid ${cat.color}` }}>
         <div style={S.shiftCardTop}>
           <div style={S.shiftMeta}>
             <span style={{ ...S.catBadge, background:cat.color+'22', color:cat.color }}>{cat.icon} {cat.label}</span>
-            <span style={S.shiftDateSm}>{fmtShort(live.date)}</span>
           </div>
           {cardIsChef && (
             <div style={{ display:'flex', gap:4 }}>
-              <button style={{ ...S.editRoomBtn, fontSize:13 }} title="Bearbeiten" onClick={() => setEditShift({ ...live })}>✏️</button>
+              <button style={{ ...S.editRoomBtn, fontSize:13 }} onClick={() => setEditShift({...live})}>✏️</button>
               <button style={S.deleteBtn} onClick={async () => { await db.deleteShift(live.id); showToast('Schicht gelöscht') }}>✕</button>
             </div>
           )}
         </div>
 
-        {tmpl && tmpl.id !== 'custom' && <div style={S.templateBadge}>{tmpl.icon} {tmpl.label}</div>}
         <div style={S.shiftName}>{live.label}</div>
         <div style={S.shiftTime}>🕐 {live.time}</div>
 
@@ -168,13 +189,14 @@ export default function App() {
               {live.applicants.length===0 && <div style={S.noApplicants}>Noch keine Bewerbungen</div>}
               {live.applicants.map(eid => {
                 const emp=getEmp(eid); if(!emp) return null
-                const ec=CATEGORIES[emp.category]
+                const ec=CATEGORIES[emp.categories?.[0] || 'service']
+                const isUnavail = db.unavailable.some(u => u.employeeId === eid && u.date === live.date)
                 return (
                   <div key={eid} style={S.applicantRow}>
                     <div style={{ ...S.empAvatar, background:ec.color+'33', color:ec.color }}>{emp.avatar}</div>
                     <div style={S.applicantInfo}>
                       <div style={S.applicantName}>{emp.name}</div>
-                      <span style={{ ...S.catBadge, fontSize:10, background:ec.color+'22', color:ec.color }}>{ec.icon} {ec.label}</span>
+                      {isUnavail && <span style={S.unavailWarn}>⚠️ Abwesend</span>}
                     </div>
                     <button style={{ ...S.assignBtn, borderColor:cat.color, color:cat.color }}
                       onClick={async () => { await db.assignEmployee(live.id,eid,live); showToast('Mitarbeiter eingeteilt ✓') }}>
@@ -202,12 +224,23 @@ export default function App() {
     )
   }
 
-  /* ═════════════════════════════════════════
-     CALENDAR
-  ═════════════════════════════════════════ */
+  /* ═══════════ CALENDAR ═══════════ */
   const Calendar = ({ monday, setMonday, calIsChef }) => {
     const days  = Array.from({ length:7 }, (_,i) => addDays(monday,i))
-    const today = toDS(new Date())
+    const todayDs = toDS(new Date())
+
+    const toggleUnavail = async (ds) => {
+      if (!activeEmployee) return
+      const isUnavail = db.unavailable.some(u => u.employeeId === activeEmployee.id && u.date === ds)
+      if (isUnavail) {
+        await db.removeUnavailableDay(activeEmployee.id, ds)
+        showToast('Verfügbarkeit wiederhergestellt')
+      } else {
+        await db.addUnavailableDay(activeEmployee.id, ds)
+        showToast('Tag als nicht verfügbar markiert')
+      }
+    }
+
     return (
       <div>
         <div style={S.calNav}>
@@ -219,34 +252,61 @@ export default function App() {
         </div>
         {calIsChef && (
           <div style={{ textAlign:'right', marginBottom:10 }}>
-            <button style={{ ...S.addBtn, background:'#888', fontSize:12, padding:'6px 14px' }} onClick={exportPDF}>📄 Wochenplan exportieren</button>
+            <button style={{ ...S.addBtn, background:'#888', fontSize:12, padding:'6px 14px' }} onClick={exportPDF}>📄 Exportieren</button>
+          </div>
+        )}
+        {!calIsChef && (
+          <div style={{ fontSize:12, color:'#aaa', marginBottom:10, padding:'8px 12px', background:'#FFF8EC', borderRadius:8, border:'1px solid #E8C54744' }}>
+            💡 Tippe auf einen Tag um ihn als <strong>nicht verfügbar</strong> zu markieren. Rot = abwesend.
           </div>
         )}
         <div style={S.calGrid}>
           {days.map((day,i) => {
-            const ds=toDS(day)
-            const dayShifts = calIsChef ? db.shifts.filter(s=>s.date===ds) : db.shifts.filter(s=>s.date===ds&&s.category===activeEmployee?.category)
-            const isToday=ds===today
+            const ds = toDS(day)
+            const isToday   = ds === todayDs
+            const isUnavail = !calIsChef && db.unavailable.some(u => u.employeeId === activeEmployee?.id && u.date === ds)
+            const dayShifts = calIsChef
+              ? db.shifts.filter(s => s.date === ds)
+              : db.shifts.filter(s => s.date === ds && empCategories.includes(s.category))
+
+            // Chef: show which employees are unavailable on this day
+            const unavailEmps = calIsChef
+              ? db.unavailable.filter(u => u.date === ds).map(u => getEmp(u.employeeId)).filter(Boolean)
+              : []
+
             return (
-              <div key={ds} style={{ ...S.calDay, ...(isToday?S.calDayToday:{}) }}>
+              <div key={ds}
+                style={{ ...S.calDay, ...(isToday?S.calDayToday:{}), ...(isUnavail?S.calDayUnavail:{}) }}
+                onClick={() => !calIsChef && toggleUnavail(ds)}>
                 <div style={{ ...S.calDayHdr, ...(isToday?{color:'#C8960A'}:{}) }}>
                   <span style={S.calDayName}>{WD[i]}</span>
                   <span style={S.calDayNum}>{day.getDate()}</span>
+                  {isUnavail && <span style={S.calDayX}>✕</span>}
                 </div>
+
+                {unavailEmps.length > 0 && (
+                  <div style={{ fontSize:9, color:'#E07070', marginBottom:2, textAlign:'center' }}>
+                    ⚠️ {unavailEmps.map(e=>e.avatar).join(' ')}
+                  </div>
+                )}
+
                 {dayShifts.length===0
                   ? <div style={S.calEmpty}>–</div>
                   : dayShifts.map(shift => {
-                    const cat=CATEGORIES[shift.category], room=getRoom(shift.room)
-                    const isAssigned=!!shift.assigned, hasApp=shift.applicants.includes(activeEmployee?.id)
+                    const cat  = CATEGORIES[shift.category]
+                    const room = getRoom(shift.room)
+                    const isAssigned = !!shift.assigned
+                    const hasApp = shift.applicants.includes(activeEmployee?.id)
                     return (
-                      <div key={shift.id} style={{ ...S.calShift, borderLeft:`3px solid ${cat.color}`, background:isAssigned?'#EDF7F0':'#FFFDF8' }}
-                        onClick={() => setCalDayDetail({shift})}>
+                      <div key={shift.id}
+                        style={{ ...S.calShift, borderLeft:`3px solid ${cat.color}`, background:isAssigned?'#EDF7F0':'#FFFDF8' }}
+                        onClick={e => { e.stopPropagation(); setCalDayDetail({shift}) }}>
                         <div style={{ fontSize:10, fontWeight:700, color:cat.color, marginBottom:1 }}>{cat.icon} {shift.label}</div>
                         <div style={{ fontSize:10, color:'#888' }}>{shift.time}</div>
-                        {room&&<div style={{ fontSize:9, color:'#6B8FB5', marginTop:1 }}>{room.icon} {room.name}</div>}
-                        {isAssigned&&<div style={{ fontSize:9, color:'#2A9D6E', fontWeight:700, marginTop:1 }}>✓</div>}
-                        {!isAssigned&&calIsChef&&shift.applicants.length>0&&<div style={{ fontSize:9, color:'#C8960A', marginTop:1 }}>👤{shift.applicants.length}</div>}
-                        {!calIsChef&&hasApp&&!isAssigned&&<div style={{ fontSize:9, color:'#2A9D6E', fontWeight:700, marginTop:1 }}>✓ Beworben</div>}
+                        {room && <div style={{ fontSize:9, color:'#6B8FB5', marginTop:1 }}>{room.icon} {room.name}</div>}
+                        {isAssigned && <div style={{ fontSize:9, color:'#2A9D6E', fontWeight:700, marginTop:1 }}>✓</div>}
+                        {!isAssigned && calIsChef && shift.applicants.length>0 && <div style={{ fontSize:9, color:'#C8960A', marginTop:1 }}>👤{shift.applicants.length}</div>}
+                        {!calIsChef && hasApp && !isAssigned && <div style={{ fontSize:9, color:'#2A9D6E', fontWeight:700, marginTop:1 }}>✓</div>}
                       </div>
                     )
                   })
@@ -255,6 +315,7 @@ export default function App() {
             )
           })}
         </div>
+
         {calDayDetail && (
           <div style={S.overlay} onClick={() => { setCalDayDetail(null); setEditingRoomSid(null) }}>
             <div style={S.modal} onClick={e=>e.stopPropagation()}>
@@ -271,15 +332,13 @@ export default function App() {
     )
   }
 
-  /* ═════════════════════════════════════════
-     NOTIFICATION PANEL
-  ═════════════════════════════════════════ */
+  /* ═══════════ NOTIFICATION PANEL ═══════════ */
   const NotifPanel = () => (
     <div style={S.notifPanel} onClick={e=>e.stopPropagation()}>
       <div style={S.notifPanelHdr}>
         <span style={S.notifPanelTitle}>🔔 Benachrichtigungen</span>
         <div style={{ display:'flex', gap:8 }}>
-          {unreadCount>0&&<button style={S.notifMarkAll} onClick={()=>db.markAllRead(currentRecipient)}>Alle gelesen</button>}
+          {unreadCount>0 && <button style={S.notifMarkAll} onClick={()=>db.markAllRead(currentRecipient)}>Alle gelesen</button>}
           <button style={{ ...S.notifMarkAll, color:'#bbb' }} onClick={()=>setShowNotifs(false)}>✕</button>
         </div>
       </div>
@@ -300,28 +359,25 @@ export default function App() {
     </div>
   )
 
-  /* ═════════════════════════════════════════
-     ACCOUNTS TAB
-  ═════════════════════════════════════════ */
+  /* ═══════════ ACCOUNTS TAB ═══════════ */
   const AccountsTab = () => {
     const chefAccs = db.accounts.filter(a=>a.role==='chef')
     const empAccs  = db.accounts.filter(a=>a.role==='employee')
-
     const AccRow = ({ acc }) => {
-      const emp = db.employees.find(e=>e.id===acc.employeeId)
-      const cat = emp ? CATEGORIES[emp.category] : null
+      const emp  = db.employees.find(e=>e.id===acc.employeeId)
+      const cats = emp?.categories || []
       return (
         <div style={S.accRow}>
-          <div style={{ ...S.accAvatar, background:cat?cat.color+'33':'#C8960A33', color:cat?cat.color:'#C8960A' }}>{mkInitials(acc.name)}</div>
+          <div style={{ ...S.accAvatar, background:'#C8960A33', color:'#C8960A' }}>{mkInitials(acc.name)}</div>
           <div style={S.accInfo}>
             <div style={S.accName}>{acc.name}</div>
             <div style={S.accRole}>
-              {cat && <span style={{ ...S.catBadge, background:cat.color+'22', color:cat.color }}>{cat.icon} {cat.label}</span>}
-              {!cat && <span>Chef</span>}
+              {cats.map(c => { const cat=CATEGORIES[c]; return cat ? <span key={c} style={{ ...S.catBadge, background:cat.color+'22', color:cat.color }}>{cat.icon}</span> : null })}
+              {!cats.length && <span>{acc.role==='chef'?'Chef':'—'}</span>}
               {acc.email && <span style={{ color:'#6B8FB5', fontSize:11 }}>· {acc.email}</span>}
             </div>
           </div>
-          <button style={S.accEditBtn} onClick={()=>{ setEditAccount({...acc}); setAccError('') }}>✏️</button>
+          <button style={S.accEditBtn} onClick={()=>{ setEditAccount({...acc, _empCats: emp?.categories || []}); setAccError('') }}>✏️</button>
           <button style={S.accDeleteBtn} onClick={async()=>{
             try { await db.deleteAccount(acc, db.accounts); showToast('Account gelöscht') }
             catch(e) { showToast(e.message) }
@@ -329,12 +385,11 @@ export default function App() {
         </div>
       )
     }
-
     return (
       <div>
         <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:16 }}>
           <h2 style={S.sectionTitle}>Account-Verwaltung</h2>
-          <button style={S.addBtn} onClick={()=>{ setNewAccForm({name:'',password:'',email:'',role:'employee',category:'service'}); setAccError(''); setShowAddAccount(true) }}>+ Account</button>
+          <button style={S.addBtn} onClick={()=>{ setNewAccForm({name:'',password:'',email:'',role:'employee',categories:['service']}); setAccError(''); setShowAddAccount(true) }}>+ Account</button>
         </div>
         <div style={S.accSection}>
           <div style={S.accSectionTitle}>👨‍🍳 Chef-Accounts</div>
@@ -349,163 +404,135 @@ export default function App() {
     )
   }
 
-  /* ═════════════════════════════════════════
-     BULK SHIFT MODAL  (new template-based dialog)
-  ═════════════════════════════════════════ */
+  /* ═══════════ BULK SHIFT MODAL ═══════════ */
   const BulkShiftModal = () => {
-    const selectedTmpl = SHIFT_TEMPLATES.find(t=>t.id===bulkForm.template) || SHIFT_TEMPLATES[0]
-    const totalPersons = Object.values(bulkForm.counts).reduce((a,b)=>a+b,0)
+    const [form, setForm] = useState(bulkForm)
+    const selectedTmpl = SHIFT_TEMPLATES.find(t=>t.id===form.template) || SHIFT_TEMPLATES[0]
+    const total = Object.values(form.counts).reduce((a,b)=>a+b,0)
 
     const handleSubmit = async () => {
-      if (!bulkForm.date) { showToast('Bitte Datum auswählen'); return }
-      if (totalPersons === 0) { showToast('Mindestens 1 Person auswählen'); return }
-      const label = bulkForm.template === 'custom' ? (bulkForm.customLabel || 'Schicht') : selectedTmpl.label
+      if (!form.date) { showToast('Bitte Datum auswählen'); return }
+      if (total===0)  { showToast('Mindestens 1 Person auswählen'); return }
+      const label = form.template==='custom' ? (form.customLabel||'Schicht') : selectedTmpl.label
       const shifts = []
-      for (const [cat, count] of Object.entries(bulkForm.counts)) {
-        for (let i = 0; i < count; i++) {
-          shifts.push({ date: bulkForm.date, label, time: bulkForm.time, category: cat, room: bulkForm.room })
-        }
-      }
+      for (const [cat, count] of Object.entries(form.counts))
+        for (let i=0; i<count; i++)
+          shifts.push({ date:form.date, label, time:form.time, category:cat, room:form.room })
       await db.addShiftsBulk(shifts, db.employees)
+      setBulkForm(form)
       setShowBulkShift(false)
-      setBulkForm({ date:'', template:'ala_carte', customLabel:'', time:'17:00 – 23:00', room:'', counts:{ theke:0, service:0, runner:0 } })
       showToast(`${shifts.length} Schicht${shifts.length>1?'en':''} erstellt ✓`)
     }
 
     return (
       <div style={S.overlay} onClick={()=>setShowBulkShift(false)}>
         <div style={S.modal} onClick={e=>e.stopPropagation()}>
-          <div style={S.modalHandle} />
+          <div style={S.modalHandle}/>
           <h3 style={S.modalTitle}>+ Schichten anlegen</h3>
-
           <label style={S.label}>Datum</label>
-          <input style={S.input} type="date" value={bulkForm.date} onChange={e=>setBulkForm({...bulkForm,date:e.target.value})} />
-
+          <input style={S.input} type="date" value={form.date} onChange={e=>setForm({...form,date:e.target.value})} />
           <label style={S.label}>Vorlage</label>
-          <select style={S.select} value={bulkForm.template}
-            onChange={e=>{
-              const t=SHIFT_TEMPLATES.find(x=>x.id===e.target.value)
-              setBulkForm({...bulkForm, template:e.target.value, time: t?.defaultTime||bulkForm.time})
-            }}>
+          <select style={S.select} value={form.template}
+            onChange={e=>{ const t=SHIFT_TEMPLATES.find(x=>x.id===e.target.value); setForm({...form,template:e.target.value,time:t?.defaultTime||form.time}) }}>
             {SHIFT_TEMPLATES.map(t=><option key={t.id} value={t.id}>{t.icon} {t.label}</option>)}
           </select>
-
-          {bulkForm.template==='custom' && (
+          {form.template==='custom' && (
             <>
               <label style={S.label}>Bezeichnung</label>
-              <input style={S.input} placeholder="z.B. Firmenfeier" value={bulkForm.customLabel} onChange={e=>setBulkForm({...bulkForm,customLabel:e.target.value})} />
+              <input style={S.input} placeholder="z.B. Firmenfeier" value={form.customLabel} onChange={e=>setForm({...form,customLabel:e.target.value})} />
             </>
           )}
-
           <label style={S.label}>Uhrzeit</label>
-          <input style={S.input} placeholder="z.B. 17:00 – 23:00" value={bulkForm.time} onChange={e=>setBulkForm({...bulkForm,time:e.target.value})} />
-
+          <input style={S.input} value={form.time} onChange={e=>setForm({...form,time:e.target.value})} />
           <label style={S.label}>Raum (optional)</label>
-          <select style={S.select} value={bulkForm.room} onChange={e=>setBulkForm({...bulkForm,room:e.target.value})}>
+          <select style={S.select} value={form.room} onChange={e=>setForm({...form,room:e.target.value})}>
             <option value="">— Kein Raum</option>
             {db.rooms.map(r=><option key={r.id} value={r.id}>{r.icon} {r.name}</option>)}
           </select>
-
           <label style={S.label}>Benötigte Personen</label>
-          {Object.entries(CATEGORIES).map(([cat, val]) => (
+          {Object.entries(CATEGORIES).map(([cat,val])=>(
             <div key={cat} style={S.counterRow}>
-              <span style={{ ...S.counterLabel, color: val.color }}>{val.icon} {val.label}</span>
+              <span style={{ ...S.counterLabel, color:val.color }}>{val.icon} {val.label}</span>
               <div style={S.counterBtns}>
-                <button style={S.counterBtn}
-                  onClick={()=>setBulkForm(f=>({...f, counts:{...f.counts,[cat]:Math.max(0,f.counts[cat]-1)}}))}>−</button>
-                <span style={S.counterVal}>{bulkForm.counts[cat]}</span>
-                <button style={S.counterBtn}
-                  onClick={()=>setBulkForm(f=>({...f, counts:{...f.counts,[cat]:f.counts[cat]+1}}))}>+</button>
+                <button style={S.counterBtn} onClick={()=>setForm(f=>({...f,counts:{...f.counts,[cat]:Math.max(0,f.counts[cat]-1)}}))}>−</button>
+                <span style={S.counterVal}>{form.counts[cat]}</span>
+                <button style={S.counterBtn} onClick={()=>setForm(f=>({...f,counts:{...f.counts,[cat]:f.counts[cat]+1}}))}>+</button>
               </div>
             </div>
           ))}
-
           <div style={{ fontSize:12, color:'#aaa', textAlign:'center', marginTop:4 }}>
-            {totalPersons > 0 ? `${totalPersons} Schicht${totalPersons>1?'en':''} werden erstellt` : 'Noch keine Personen ausgewählt'}
+            {total>0 ? `${total} Schicht${total>1?'en':''} werden erstellt` : 'Noch keine Personen ausgewählt'}
           </div>
-
           <div style={S.modalActions}>
             <button style={S.cancelBtn} onClick={()=>setShowBulkShift(false)}>Abbrechen</button>
-            <button style={{ ...S.confirmBtn, opacity: totalPersons===0?0.5:1 }} onClick={handleSubmit}>Erstellen</button>
+            <button style={{ ...S.confirmBtn, opacity:total===0?0.5:1 }} onClick={handleSubmit}>Erstellen</button>
           </div>
         </div>
       </div>
     )
   }
 
-  /* ═════════════════════════════════════════
-     EDIT SHIFT MODAL
-  ═════════════════════════════════════════ */
+  /* ═══════════ EDIT SHIFT MODAL ═══════════ */
   const EditShiftModal = () => {
     if (!editShift) return null
+    const [form, setForm] = useState(editShift)
     return (
       <div style={S.overlay} onClick={()=>setEditShift(null)}>
         <div style={S.modal} onClick={e=>e.stopPropagation()}>
-          <div style={S.modalHandle} />
+          <div style={S.modalHandle}/>
           <h3 style={S.modalTitle}>✏️ Schicht bearbeiten</h3>
-
           <label style={S.label}>Datum</label>
-          <input style={S.input} type="date" value={editShift.date} onChange={e=>setEditShift({...editShift,date:e.target.value})} />
-
+          <input style={S.input} type="date" value={form.date} onChange={e=>setForm({...form,date:e.target.value})} />
           <label style={S.label}>Bezeichnung</label>
-          <input style={S.input} value={editShift.label} onChange={e=>setEditShift({...editShift,label:e.target.value})} />
-
+          <input style={S.input} value={form.label} onChange={e=>setForm({...form,label:e.target.value})} />
           <label style={S.label}>Uhrzeit</label>
-          <input style={S.input} value={editShift.time} onChange={e=>setEditShift({...editShift,time:e.target.value})} />
-
+          <input style={S.input} value={form.time} onChange={e=>setForm({...form,time:e.target.value})} />
           <label style={S.label}>Kategorie</label>
-          <CatPills value={editShift.category} onChange={v=>setEditShift({...editShift,category:v})} />
-
+          <CatPills value={form.category} onChange={v=>setForm({...form,category:v})} />
           <label style={S.label}>Raum</label>
-          <select style={S.select} value={editShift.room||''} onChange={e=>setEditShift({...editShift,room:e.target.value})}>
+          <select style={S.select} value={form.room||''} onChange={e=>setForm({...form,room:e.target.value})}>
             <option value="">— Kein Raum</option>
             {db.rooms.map(r=><option key={r.id} value={r.id}>{r.icon} {r.name}</option>)}
           </select>
-
           <label style={S.label}>Eingeteilt</label>
-          <select style={S.select} value={editShift.assigned||''} onChange={e=>setEditShift({...editShift,assigned:e.target.value?Number(e.target.value):null})}>
+          <select style={S.select} value={form.assigned||''} onChange={e=>setForm({...form,assigned:e.target.value?Number(e.target.value):null})}>
             <option value="">— Niemand</option>
-            {db.employees.filter(e=>e.category===editShift.category).map(e=>(
+            {db.employees.filter(e=>(e.categories||[]).includes(form.category)).map(e=>(
               <option key={e.id} value={e.id}>{e.name}</option>
             ))}
           </select>
-
           <div style={S.modalActions}>
             <button style={S.cancelBtn} onClick={()=>setEditShift(null)}>Abbrechen</button>
-            <button style={S.confirmBtn} onClick={async()=>{
-              await db.updateShift(editShift.id, editShift)
-              setEditShift(null); showToast('Schicht gespeichert ✓')
-            }}>Speichern</button>
+            <button style={S.confirmBtn} onClick={async()=>{ await db.updateShift(form.id,form); setEditShift(null); showToast('Schicht gespeichert ✓') }}>Speichern</button>
           </div>
         </div>
       </div>
     )
   }
 
-  /* ═════════════════════════════════════════
-     EDIT ACCOUNT MODAL (incl. category change)
-  ═════════════════════════════════════════ */
+  /* ═══════════ EDIT ACCOUNT MODAL ═══════════ */
   const EditAccountModal = () => {
     if (!editAccount) return null
-    const emp = db.employees.find(e=>e.id===editAccount.employeeId)
-    const [localCat, setLocalCat] = useState(emp?.category || 'service')
-    const [newPw, setNewPw] = useState('')
+    const [name,     setName]     = useState(editAccount.name)
+    const [email,    setEmail]    = useState(editAccount.email || '')
+    const [newPw,    setNewPw]    = useState('')
+    const [cats,     setCats]     = useState(editAccount._empCats || ['service'])
 
     return (
       <div style={S.overlay} onClick={()=>setEditAccount(null)}>
         <div style={S.modal} onClick={e=>e.stopPropagation()}>
-          <div style={S.modalHandle} />
+          <div style={S.modalHandle}/>
           <h3 style={S.modalTitle}>✏️ Account bearbeiten</h3>
           <label style={S.label}>Name</label>
-          <input style={S.input} value={editAccount.name} onChange={e=>setEditAccount({...editAccount,name:e.target.value})} />
+          <Input value={name} onChange={setName} placeholder="Name" />
           <label style={S.label}>E-Mail</label>
-          <input style={S.input} type="email" placeholder="fuer@benachrichtigungen.de" value={editAccount.email||''} onChange={e=>setEditAccount({...editAccount,email:e.target.value})} />
-          <label style={S.label}>Neues Passwort (leer lassen = unveränert)</label>
-          <input style={S.input} type="password" placeholder="Nur ausfüllen wenn ändern" value={newPw} onChange={e=>setNewPw(e.target.value)} />
-          {editAccount.role==='employee' && emp && (
+          <Input value={email} onChange={setEmail} type="email" placeholder="email@restaurant.de" />
+          <label style={S.label}>Neues Passwort (leer lassen = unverändert)</label>
+          <Input value={newPw} onChange={setNewPw} type="password" placeholder="Nur ausfüllen wenn ändern" />
+          {editAccount.role==='employee' && (
             <>
-              <label style={S.label}>Kategorie</label>
-              <CatPills value={localCat} onChange={setLocalCat} />
+              <label style={S.label}>Positionen (mehrere möglich)</label>
+              <CatPills value={cats} onChange={setCats} multi />
             </>
           )}
           {accError && <div style={S.accErrorBox}>{accError}</div>}
@@ -513,9 +540,7 @@ export default function App() {
             <button style={S.cancelBtn} onClick={()=>setEditAccount(null)}>Abbrechen</button>
             <button style={S.confirmBtn} onClick={async()=>{
               try {
-                await db.updateAccount(editAccount, { name: editAccount.name, email: editAccount.email, newPassword: newPw }, db.accounts)
-                if (editAccount.role==='employee' && emp && localCat!==emp.category)
-                  await db.updateEmployeeCategory(emp.id, localCat)
+                await db.updateAccount(editAccount, { name, email, newPassword:newPw, categories:cats }, db.accounts)
                 setEditAccount(null); showToast('Account aktualisiert ✓')
               } catch(e) { setAccError(e.message) }
             }}>Speichern</button>
@@ -525,12 +550,10 @@ export default function App() {
     )
   }
 
-  /* ═════════════════════════════════════════
-     MAIN RENDER
-  ═════════════════════════════════════════ */
+  /* ═══════════ MAIN RENDER ═══════════ */
   return (
     <div style={S.root} onClick={()=>{ if(showNotifs) setShowNotifs(false) }}>
-      <div style={S.bgPattern} />
+      <div style={S.bgPattern}/>
       {toast && <div style={S.toast}>{toast}</div>}
 
       {/* HEADER */}
@@ -556,7 +579,7 @@ export default function App() {
             <button style={S.bellBtn} onClick={e=>{ e.stopPropagation(); setShowNotifs(v=>!v); if(!showNotifs) db.markAllRead(currentRecipient) }}>
               🔔{unreadCount>0&&<span style={S.bellBadge}>{unreadCount>9?'9+':unreadCount}</span>}
             </button>
-            {showNotifs && <NotifPanel />}
+            {showNotifs && <NotifPanel/>}
           </div>
           <button style={S.logoutBtn} onClick={()=>{ setCurrentAccount(null); setShowNotifs(false) }}>↩</button>
         </div>
@@ -566,22 +589,14 @@ export default function App() {
       <div style={S.statsBar}>
         {Object.entries(CATEGORIES).map(([key,val])=>(
           <div key={key} style={S.statCard}>
-            <span style={{ fontSize:18 }}>{val.icon}</span>
+            <span style={{ fontSize:16 }}>{val.icon}</span>
             <div>
-              <div style={{ fontSize:10, fontWeight:700, letterSpacing:1, textTransform:'uppercase', color:val.color }}>{val.label}</div>
-              <div style={S.statNum}>{db.employees.filter(e=>e.category===key).length}</div>
+              <div style={{ fontSize:9, fontWeight:700, letterSpacing:1, textTransform:'uppercase', color:val.color }}>{val.label}</div>
+              <div style={S.statNum}>{db.employees.filter(e=>(e.categories||[]).includes(key)).length}</div>
             </div>
-            <div style={S.statChip}>{db.shifts.filter(s=>s.category===key&&!s.assigned).length} offen</div>
+            <div style={S.statChip}>{db.shifts.filter(s=>s.category===key&&!s.assigned&&s.date>=today).length}</div>
           </div>
         ))}
-        <div style={S.statCard}>
-          <span style={{ fontSize:18 }}>📋</span>
-          <div>
-            <div style={{ fontSize:10, fontWeight:700, letterSpacing:1, textTransform:'uppercase', color:'#aaa' }}>Gesamt</div>
-            <div style={S.statNum}>{db.shifts.length}</div>
-          </div>
-          <div style={S.statChip}>{db.shifts.filter(s=>s.assigned).length} besetzt</div>
-        </div>
       </div>
 
       <div style={S.main}>
@@ -607,15 +622,17 @@ export default function App() {
                       <div>
                         <h2 style={S.sectionTitle}>Schichten</h2>
                         <div style={S.filterRow}>
-                          {['all','theke','service','runner'].map(c=>(
-                            <button key={c} style={filterCat===c?S.filterActive:S.filterBtn} onClick={()=>setFilterCat(c)}>
-                              {c==='all'?'Alle':CATEGORIES[c]?.label}
-                            </button>
+                          <button style={filterCat==='all'?S.filterActive:S.filterBtn} onClick={()=>setFilterCat('all')}>Alle</button>
+                          {Object.entries(CATEGORIES).map(([k,v])=>(
+                            <button key={k} style={filterCat===k?S.filterActive:S.filterBtn} onClick={()=>setFilterCat(k)}>{v.icon} {v.label}</button>
                           ))}
                         </div>
                         <div style={{ ...S.filterRow, marginTop:6 }}>
                           <button style={filterRoom==='all'?S.filterActive:S.filterBtn} onClick={()=>setFilterRoom('all')}>🏢 Alle</button>
                           {db.rooms.map(r=><button key={r.id} style={filterRoom===r.id?S.filterActive:S.filterBtn} onClick={()=>setFilterRoom(r.id)}>{r.icon} {r.name}</button>)}
+                          <button style={showOnlyFuture?S.filterActive:S.filterBtn} onClick={()=>setShowOnlyFuture(v=>!v)}>
+                            {showOnlyFuture?'📅 Nur zukünftige':'📅 Alle Daten'}
+                          </button>
                         </div>
                       </div>
                       <div style={S.actionBtns}>
@@ -623,24 +640,45 @@ export default function App() {
                         <button style={{ ...S.addBtn, background:'#6B8FB5' }} onClick={()=>setShowManageRooms(true)}>🏢 Räume</button>
                       </div>
                     </div>
-                    <div style={S.shiftGrid}>
-                      {filtered.length===0&&<div style={S.empty}>Keine Schichten gefunden.</div>}
-                      {filtered.map(s=><ShiftCard key={s.id} shift={s} cardIsChef />)}
-                    </div>
+
+                    {/* Grouped by date */}
+                    {groupedShifts.length===0 && <div style={S.empty}>Keine Schichten gefunden.</div>}
+                    {groupedShifts.map(([date, shifts]) => {
+                      const unavailOnDay = db.unavailable.filter(u => u.date === date)
+                      return (
+                        <div key={date} style={S.dayGroup}>
+                          <div style={S.dayGroupHeader}>
+                            <span style={S.dayGroupDate}>{fmtLong(date)}</span>
+                            <span style={S.dayGroupCount}>{shifts.length} Schicht{shifts.length>1?'en':''}</span>
+                            {unavailOnDay.length>0 && (
+                              <span style={S.dayGroupUnavail}>
+                                ⚠️ {unavailOnDay.map(u => getEmp(u.employeeId)?.name).filter(Boolean).join(', ')} abwesend
+                              </span>
+                            )}
+                          </div>
+                          <div style={S.shiftGrid}>
+                            {shifts.map(s=><ShiftCard key={s.id} shift={s} cardIsChef />)}
+                          </div>
+                        </div>
+                      )
+                    })}
+
                     <h2 style={{ ...S.sectionTitle, marginTop:24 }}>Team ({db.employees.length})</h2>
                     <div style={S.empGrid}>
                       {db.employees.map(emp=>{
-                        const cat=CATEGORIES[emp.category]
-                        const nots=db.notifications.filter(n=>n.recipientId===emp.id&&!n.read).length
+                        const primCat = CATEGORIES[emp.categories?.[0]] || CATEGORIES.service
+                        const nots = db.notifications.filter(n=>n.recipientId===emp.id&&!n.read).length
                         return (
                           <div key={emp.id} style={S.empCard}>
                             <div style={{ position:'relative' }}>
-                              <div style={{ ...S.empAvatarLg, background:cat.color+'33', color:cat.color }}>{emp.avatar}</div>
+                              <div style={{ ...S.empAvatarLg, background:primCat.color+'33', color:primCat.color }}>{emp.avatar}</div>
                               {nots>0&&<span style={S.empNotifDot}>{nots}</span>}
                             </div>
                             <div style={S.empName}>{emp.name}</div>
-                            <span style={{ ...S.catBadge, background:cat.color+'22', color:cat.color }}>{cat.icon} {cat.label}</span>
-                            <div style={{ fontSize:10, color:'#aaa' }}>{db.shifts.filter(s=>s.assigned===emp.id).length} Schicht(en)</div>
+                            <div style={S.empCatBadges}>
+                              {(emp.categories||[]).map(c=>{ const cat=CATEGORIES[c]; return cat?<span key={c} style={{ ...S.catBadge, fontSize:10, background:cat.color+'22', color:cat.color }}>{cat.icon}</span>:null })}
+                            </div>
+                            <div style={{ fontSize:10, color:'#aaa' }}>{db.shifts.filter(s=>s.assigned===emp.id&&s.date>=today).length} Schicht(en)</div>
                           </div>
                         )
                       })}
@@ -650,7 +688,7 @@ export default function App() {
                 {chefTab==='kalender'&&<Calendar monday={calChef} setMonday={setCalChef} calIsChef />}
               </>
             )}
-            {chefSubTab==='accounts'&&<AccountsTab />}
+            {chefSubTab==='accounts'&&<AccountsTab/>}
           </div>
         )}
 
@@ -661,18 +699,22 @@ export default function App() {
               <button style={mitTab==='liste'    ?S.tabActive:S.tab} onClick={()=>setMitTab('liste')}>📋 Liste</button>
               <button style={mitTab==='kalender' ?S.tabActive:S.tab} onClick={()=>setMitTab('kalender')}>📅 Kalender</button>
             </div>
+
             {(() => {
-              const empCat=CATEGORIES[activeEmployee.category]
-              const available=db.shifts.filter(s=>s.category===activeEmployee.category)
-              const applied=available.filter(s=>s.applicants.includes(activeEmployee.id))
-              const assigned=db.shifts.filter(s=>s.assigned===activeEmployee.id)
+              const available = db.shifts.filter(s => empCategories.includes(s.category) && s.date >= today)
+              const applied   = available.filter(s => s.applicants.includes(activeEmployee.id))
+              const assigned  = db.shifts.filter(s => s.assigned === activeEmployee.id)
+              const primCat   = CATEGORIES[empCategories[0]] || CATEGORIES.service
+
               return (
                 <>
                   <div style={S.profileBanner}>
-                    <div style={{ ...S.empAvatarLg, background:empCat.color+'44', color:empCat.color, fontSize:20 }}>{activeEmployee.avatar}</div>
+                    <div style={{ ...S.empAvatarLg, background:primCat.color+'44', color:primCat.color, fontSize:20 }}>{activeEmployee.avatar}</div>
                     <div>
                       <div style={S.profileName}>{activeEmployee.name}</div>
-                      <span style={{ ...S.catBadge, background:empCat.color+'22', color:empCat.color }}>{empCat.icon} {empCat.label}</span>
+                      <div style={{ display:'flex', gap:4, flexWrap:'wrap', marginTop:4 }}>
+                        {empCategories.map(c=>{ const cat=CATEGORIES[c]; return cat?<span key={c} style={{ ...S.catBadge, background:cat.color+'22', color:cat.color }}>{cat.icon} {cat.label}</span>:null })}
+                      </div>
                     </div>
                     <div style={{ marginLeft:'auto', display:'flex', gap:16 }}>
                       {[{n:applied.length,l:'Beworben'},{n:assigned.length,l:'Eingeteilt'}].map(({n,l})=>(
@@ -687,13 +729,14 @@ export default function App() {
                   {mitTab==='liste' && (
                     <>
                       {assigned.length>0&&(
-                        <><h3 style={S.subTitle}>✅ Meine Schichten</h3>
+                        <>
+                          <h3 style={S.subTitle}>✅ Meine Schichten</h3>
                           <div style={S.shiftGrid}>{assigned.map(s=><ShiftCard key={s.id} shift={s} isEmployee />)}</div>
                         </>
                       )}
-                      <h3 style={S.subTitle}>📋 Offene Schichten ({empCat.label})</h3>
+                      <h3 style={S.subTitle}>📋 Offene Schichten</h3>
                       <div style={S.shiftGrid}>
-                        {available.filter(s=>!s.assigned).length===0&&<div style={S.empty}>Keine offenen Schichten.</div>}
+                        {available.filter(s=>!s.assigned).length===0 && <div style={S.empty}>Keine offenen Schichten.</div>}
                         {available.filter(s=>!s.assigned).map(s=><ShiftCard key={s.id} shift={s} isEmployee />)}
                       </div>
                     </>
@@ -707,15 +750,15 @@ export default function App() {
       </div>
 
       {/* MODALS */}
-      {showBulkShift   && <BulkShiftModal />}
-      {editShift       && <EditShiftModal />}
-      {editAccount     && <EditAccountModal />}
+      {showBulkShift  && <BulkShiftModal/>}
+      {editShift      && <EditShiftModal/>}
+      {editAccount    && <EditAccountModal/>}
 
       {/* Räume Modal */}
       {showManageRooms && (
         <div style={S.overlay} onClick={()=>setShowManageRooms(false)}>
           <div style={S.modal} onClick={e=>e.stopPropagation()}>
-            <div style={S.modalHandle} />
+            <div style={S.modalHandle}/>
             <h3 style={S.modalTitle}>🏢 Räume verwalten</h3>
             <div style={{ marginBottom:14 }}>
               {db.rooms.length===0&&<div style={{ fontSize:13,color:'#bbb',fontStyle:'italic' }}>Noch keine Räume.</div>}
@@ -731,9 +774,8 @@ export default function App() {
             <div style={{ borderTop:'1px solid #E0DBD0',paddingTop:12 }}>
               <label style={S.label}>Neuer Raum</label>
               <div style={{ display:'flex',gap:8,marginBottom:8 }}>
-                <input style={{ ...S.input,width:60,textAlign:'center',fontSize:20,padding:'8px 4px' }} placeholder="🏠" value={newRoomIcon} onChange={e=>setNewRoomIcon(e.target.value)} maxLength={2} />
-                <input style={{ ...S.input,flex:1 }} placeholder="z.B. Wintergarten" value={newRoomName} onChange={e=>setNewRoomName(e.target.value)}
-                  onKeyDown={async e=>{ if(e.key==='Enter'&&newRoomName.trim()){ await db.addRoom(newRoomName,newRoomIcon); setNewRoomName(''); setNewRoomIcon('🏠'); showToast('Raum hinzugefügt ✓') }}} />
+                <Input value={newRoomIcon} onChange={setNewRoomIcon} style={{ width:60,textAlign:'center',fontSize:20,padding:'8px 4px' }} />
+                <Input value={newRoomName} onChange={setNewRoomName} placeholder="z.B. Wintergarten" style={{ flex:1 }} />
               </div>
               <button style={{ ...S.confirmBtn,width:'100%' }} onClick={async()=>{
                 if(!newRoomName.trim()) return
@@ -751,25 +793,27 @@ export default function App() {
       {showAddAccount && (
         <div style={S.overlay} onClick={()=>setShowAddAccount(false)}>
           <div style={S.modal} onClick={e=>e.stopPropagation()}>
-            <div style={S.modalHandle} />
+            <div style={S.modalHandle}/>
             <h3 style={S.modalTitle}>🔑 Account erstellen</h3>
             <label style={S.label}>Name</label>
-            <input style={S.input} placeholder="Vor- und Nachname" value={newAccForm.name} onChange={e=>setNewAccForm({...newAccForm,name:e.target.value})} />
-            <label style={S.label}>E-Mail (für Benachrichtigungen)</label>
-            <input style={S.input} type="email" placeholder="mitarbeiter@restaurant.de" value={newAccForm.email} onChange={e=>setNewAccForm({...newAccForm,email:e.target.value})} />
+            <Input value={newAccForm.name} onChange={v=>setNewAccForm(f=>({...f,name:v}))} placeholder="Vor- und Nachname" />
+            <label style={S.label}>E-Mail</label>
+            <Input value={newAccForm.email} onChange={v=>setNewAccForm(f=>({...f,email:v}))} type="email" placeholder="mitarbeiter@restaurant.de" />
             <label style={S.label}>Passwort</label>
-            <input style={S.input} type="password" placeholder="Mindestens 4 Zeichen" value={newAccForm.password} onChange={e=>setNewAccForm({...newAccForm,password:e.target.value})} />
+            <Input value={newAccForm.password} onChange={v=>setNewAccForm(f=>({...f,password:v}))} type="password" placeholder="Mindestens 4 Zeichen" />
             <label style={S.label}>Rolle</label>
             <div style={S.catSelect}>
               {[{v:'employee',l:'👤 Mitarbeiter'},{v:'chef',l:'👨‍🍳 Chef'}].map(({v,l})=>(
                 <button key={v} style={newAccForm.role===v?{...S.catBtn,background:'#C8960A33',border:'1px solid #C8960A',color:'#C8960A'}:S.catBtn}
-                  onClick={()=>setNewAccForm({...newAccForm,role:v})}>{l}</button>
+                  onClick={()=>setNewAccForm(f=>({...f,role:v}))}>
+                  {l}
+                </button>
               ))}
             </div>
             {newAccForm.role==='employee'&&(
               <>
-                <label style={S.label}>Kategorie</label>
-                <CatPills value={newAccForm.category} onChange={v=>setNewAccForm({...newAccForm,category:v})} />
+                <label style={S.label}>Positionen (mehrere möglich)</label>
+                <CatPills value={newAccForm.categories} onChange={v=>setNewAccForm(f=>({...f,categories:v}))} multi />
               </>
             )}
             {accError&&<div style={S.accErrorBox}>{accError}</div>}

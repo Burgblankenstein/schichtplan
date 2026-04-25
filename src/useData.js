@@ -1,12 +1,14 @@
 import { useState, useEffect, useCallback } from 'react'
-import { supabase, callFunction } from './supabase'
+import { supabase } from './supabase'
 import { mkInitials, fmtShort, CHEF_ID, CATEGORIES } from './constants'
 
+// employees.categories is now an array e.g. ['service','runner']
 const mapShift    = r => ({ id: r.id, date: r.date, label: r.label, time: r.time, category: r.category, room: r.room || '', applicants: r.applicants || [], assigned: r.assigned })
-const mapEmployee = r => ({ id: r.id, name: r.name, category: r.category, avatar: r.avatar })
+const mapEmployee = r => ({ id: r.id, name: r.name, categories: r.categories || [r.category].filter(Boolean), avatar: r.avatar })
 const mapRoom     = r => ({ id: r.id, name: r.name, icon: r.icon })
 const mapAccount  = r => ({ id: r.id, name: r.name, role: r.role, employeeId: r.employee_id, email: r.email || '' })
 const mapNotif    = r => ({ id: r.id, recipientId: r.recipient_id, type: r.type, text: r.text, shiftId: r.shift_id, read: r.read, ts: r.ts })
+const mapUnavail  = r => ({ id: r.id, employeeId: r.employee_id, date: r.date, note: r.note || '' })
 
 export default function useData() {
   const [shifts,        setShifts]        = useState([])
@@ -14,18 +16,20 @@ export default function useData() {
   const [rooms,         setRooms]         = useState([])
   const [accounts,      setAccounts]      = useState([])
   const [notifications, setNotifications] = useState([])
+  const [unavailable,   setUnavailable]   = useState([])
   const [loading,       setLoading]       = useState(true)
   const [error,         setError]         = useState(null)
 
   useEffect(() => {
     async function load() {
       try {
-        const [sh, em, rm, ac, no] = await Promise.all([
+        const [sh, em, rm, ac, no, un] = await Promise.all([
           supabase.from('shifts').select('*').order('date'),
           supabase.from('employees').select('*').order('name'),
           supabase.from('rooms').select('*'),
           supabase.from('accounts').select('id,name,role,employee_id,email').order('role'),
           supabase.from('notifications').select('*').order('ts', { ascending: false }),
+          supabase.from('unavailable_days').select('*'),
         ])
         if (sh.error) throw sh.error
         setShifts(sh.data.map(mapShift))
@@ -33,6 +37,7 @@ export default function useData() {
         setRooms(rm.data.map(mapRoom))
         setAccounts(ac.data.map(mapAccount))
         setNotifications(no.data.map(mapNotif))
+        setUnavailable((un.data || []).map(mapUnavail))
       } catch (e) { setError(e.message) }
       finally { setLoading(false) }
     }
@@ -40,8 +45,8 @@ export default function useData() {
   }, [])
 
   useEffect(() => {
-    const reload = (table, setter, mapper, selectCols = '*', col = null, asc = true) => {
-      let q = supabase.from(table).select(selectCols)
+    const reload = (table, setter, mapper, sel = '*', col = null, asc = true) => {
+      let q = supabase.from(table).select(sel)
       if (col) q = q.order(col, { ascending: asc })
       q.then(({ data }) => data && setter(data.map(mapper)))
     }
@@ -56,78 +61,58 @@ export default function useData() {
         reload('accounts', setAccounts, mapAccount, 'id,name,role,employee_id,email', 'role')).subscribe(),
       supabase.channel('room-ch').on('postgres_changes', { event:'*', schema:'public', table:'rooms' }, () =>
         reload('rooms', setRooms, mapRoom)).subscribe(),
+      supabase.channel('unavail-ch').on('postgres_changes', { event:'*', schema:'public', table:'unavailable_days' }, () =>
+        reload('unavailable_days', setUnavailable, mapUnavail)).subscribe(),
     ]
     return () => channels.forEach(c => supabase.removeChannel(c))
   }, [])
 
-  /* ── AUTH via Edge Function ── */
-  // Login: Passwortprüfung passiert sicher auf dem Server (bcrypt)
-  /* ── AUTH — direkt im Browser mit SHA-256 ── */
+  /* ── AUTH ── */
   const sha256 = async (text) => {
-    const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text))
-    return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2,"0")).join("")
+    const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text))
+    return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2,'0')).join('')
   }
 
   const login = useCallback(async (name, password) => {
-    const hashedInput = "sha256:" + await sha256(password)
-
+    const hashedInput = 'sha256:' + await sha256(password)
     const { data: rows } = await supabase
-      .from("accounts")
-      .select("id,name,role,employee_id,email,password")
-      .ilike("name", name.trim())
-
+      .from('accounts')
+      .select('id,name,role,employee_id,email,password')
+      .ilike('name', name.trim())
     const acc = rows?.[0]
-    if (!acc) throw new Error("Name oder Passwort falsch.")
-
+    if (!acc) throw new Error('Name oder Passwort falsch.')
     let isValid = false
-    if (acc.password.startsWith("sha256:")) {
+    if (acc.password?.startsWith('sha256:')) {
       isValid = acc.password === hashedInput
     } else {
-      // Legacy Klartext — vergleichen und sofort hashen
       isValid = acc.password === password
-      if (isValid) {
-        await supabase.from("accounts").update({ password: hashedInput }).eq("id", acc.id)
-      }
+      if (isValid) await supabase.from('accounts').update({ password: hashedInput }).eq('id', acc.id)
     }
-
-    if (!isValid) throw new Error("Name oder Passwort falsch.")
-
+    if (!isValid) throw new Error('Name oder Passwort falsch.')
     const { password: _, ...safe } = acc
     return mapAccount(safe)
   }, [])
 
-  /* ── EMAIL via Edge Function ── */
+  /* ── NOTIFICATIONS ── */
   const sendEmail = async (to, type, emailData) => {
-    if (!to) return // kein Absturz wenn keine E-Mail hinterlegt
+    if (!to) return
     try {
-      await callFunction('send-email', { to, type, data: emailData })
-    } catch (e) {
-      console.warn('E-Mail konnte nicht gesendet werden:', e.message)
-      // E-Mail-Fehler blockieren nicht die App
-    }
+      await supabase.functions.invoke('send-email', { body: { to, type, data: emailData } })
+    } catch (e) { console.warn('E-Mail Fehler:', e.message) }
   }
 
-  // Hilfsfunktion: E-Mail-Adresse eines Empfängers suchen
   const getEmail = (recipientId) => {
-    if (recipientId === CHEF_ID) {
-      return accounts.find(a => a.role === 'chef')?.email || null
-    }
+    if (recipientId === CHEF_ID) return accounts.find(a => a.role === 'chef')?.email || null
     return accounts.find(a => a.employeeId === recipientId || a.id === String(recipientId))?.email || null
   }
 
-  /* ── NOTIFICATIONS (in-app + e-mail) ── */
   const pushNotif = async (recipientId, type, text, shiftId = null, emailData = null) => {
-    // In-App Benachrichtigung
     await supabase.from('notifications').insert({
       id: Date.now() + (Math.random() * 10000 | 0),
       recipient_id: recipientId, type, text,
       shift_id: shiftId, read: false, ts: new Date().toISOString(),
     })
-    // E-Mail (parallel, blockiert nicht)
-    if (emailData) {
-      const email = getEmail(recipientId)
-      if (email) sendEmail(email, type, emailData)
-    }
+    if (emailData) { const email = getEmail(recipientId); if (email) sendEmail(email, type, emailData) }
   }
 
   const markAllRead = async (rId) => {
@@ -154,20 +139,11 @@ export default function useData() {
     const id = await _insertShift(s)
     const room = rooms.find(r => r.id === s.room)
     const cat  = CATEGORIES[s.category]
-    for (const e of allEmployees.filter(e => e.category === s.category)) {
-      await pushNotif(
-        e.id, 'new_shift',
-        `Neue Schicht: ${s.label} (${cat.label}) am ${fmtShort(s.date)}`,
-        id,
-        {
-          employeeName: e.name,
-          shiftLabel:   s.label,
-          shiftDate:    fmtShort(s.date),
-          shiftTime:    s.time,
-          shiftIcon:    cat.icon,
-          category:     cat.label,
-          room:         room?.name || '',
-        }
+    // notify employees who have this category in their categories array
+    for (const e of allEmployees.filter(e => (e.categories || []).includes(s.category))) {
+      await pushNotif(e.id, 'new_shift',
+        `Neue Schicht: ${s.label} (${cat.label}) am ${fmtShort(s.date)}`, id,
+        { employeeName: e.name, shiftLabel: s.label, shiftDate: fmtShort(s.date), shiftTime: s.time, shiftIcon: cat.icon, category: cat.label, room: room?.name || '' }
       )
     }
   }
@@ -179,8 +155,7 @@ export default function useData() {
   const updateShift = async (shiftId, u) => {
     const { error } = await supabase.from('shifts').update({
       date: u.date, label: u.label, time: u.time,
-      category: u.category, room: u.room || null,
-      assigned: u.assigned ?? null,
+      category: u.category, room: u.room || null, assigned: u.assigned ?? null,
     }).eq('id', shiftId)
     if (error) throw error
   }
@@ -195,51 +170,44 @@ export default function useData() {
     const emp  = employees.find(e => e.id === empId)
     const cat  = CATEGORIES[shift.category]
     const room = rooms.find(r => r.id === shift.room)
-    await pushNotif(
-      empId, 'assigned',
-      `Du wurdest für „${shift.label}" am ${fmtShort(shift.date)} eingeteilt!`,
-      shiftId,
-      {
-        employeeName: emp?.name || '',
-        shiftLabel:   shift.label,
-        shiftDate:    fmtShort(shift.date),
-        shiftTime:    shift.time,
-        shiftIcon:    cat.icon,
-        category:     cat.label,
-        room:         room?.name || '',
-      }
+    await pushNotif(empId, 'assigned',
+      `Du wurdest für „${shift.label}" am ${fmtShort(shift.date)} eingeteilt!`, shiftId,
+      { employeeName: emp?.name || '', shiftLabel: shift.label, shiftDate: fmtShort(shift.date), shiftTime: shift.time, shiftIcon: cat.icon, category: cat.label, room: room?.name || '' }
     )
   }
 
-  const unassignEmployee = async (shiftId) => supabase.from('shifts').update({ assigned: null }).eq('id', shiftId)
-  const changeRoom       = async (shiftId, roomId) => supabase.from('shifts').update({ room: roomId || null }).eq('id', shiftId)
+  const unassignEmployee = async (sid) => supabase.from('shifts').update({ assigned: null }).eq('id', sid)
+  const changeRoom       = async (sid, roomId) => supabase.from('shifts').update({ room: roomId || null }).eq('id', sid)
 
   const applyForShift = async (shiftId, shift, employee) => {
     if (shift.applicants.includes(employee.id)) return
     await supabase.from('shifts').update({ applicants: [...shift.applicants, employee.id] }).eq('id', shiftId)
     const cat  = CATEGORIES[shift.category]
     const room = rooms.find(r => r.id === shift.room)
-    // Alle Chef-Accounts benachrichtigen
-    for (const chefAcc of accounts.filter(a => a.role === 'chef')) {
-      await pushNotif(
-        CHEF_ID, 'application',
-        `${employee.name} hat sich auf „${shift.label}" am ${fmtShort(shift.date)} beworben`,
-        shiftId,
-        {
-          employeeName: employee.name,
-          shiftLabel:   shift.label,
-          shiftDate:    fmtShort(shift.date),
-          shiftTime:    shift.time,
-          shiftIcon:    cat.icon,
-          category:     cat.label,
-          room:         room?.name || '',
-        }
-      )
-    }
+    await pushNotif(CHEF_ID, 'application',
+      `${employee.name} hat sich auf „${shift.label}" am ${fmtShort(shift.date)} beworben`, shiftId,
+      { employeeName: employee.name, shiftLabel: shift.label, shiftDate: fmtShort(shift.date), shiftTime: shift.time, shiftIcon: cat.icon, category: cat.label, room: room?.name || '' }
+    )
   }
 
   const withdrawApplication = async (shiftId, shift, empId) => {
     await supabase.from('shifts').update({ applicants: shift.applicants.filter(i => i !== empId) }).eq('id', shiftId)
+  }
+
+  /* ── UNAVAILABLE DAYS ── */
+  const addUnavailableDay = async (employeeId, date, note = '') => {
+    const existing = unavailable.find(u => u.employeeId === employeeId && u.date === date)
+    if (existing) return
+    await supabase.from('unavailable_days').insert({
+      id: Date.now() + (Math.random() * 1000 | 0),
+      employee_id: employeeId, date, note,
+    })
+  }
+
+  const removeUnavailableDay = async (employeeId, date) => {
+    const entry = unavailable.find(u => u.employeeId === employeeId && u.date === date)
+    if (!entry) return
+    await supabase.from('unavailable_days').delete().eq('id', entry.id)
   }
 
   /* ── ROOMS ── */
@@ -253,49 +221,44 @@ export default function useData() {
   const addAccount = async (form) => {
     if (accounts.find(a => a.name.toLowerCase() === form.name.trim().toLowerCase()))
       throw new Error('Dieser Name ist bereits vergeben.')
-
     let employeeId = null
     if (form.role === 'employee') {
       const empId = Date.now()
+      const cats = form.categories?.length ? form.categories : [form.category || 'service']
       const { error } = await supabase.from('employees').insert({
-        id: empId, name: form.name.trim(), category: form.category, avatar: mkInitials(form.name)
+        id: empId, name: form.name.trim(),
+        categories: cats,
+        category: cats[0], // legacy fallback
+        avatar: mkInitials(form.name)
       })
       if (error) throw error
       employeeId = empId
     }
-
-    // Passwort über Edge Function hashen
-    const tmpId = 'a' + Date.now()
-    // Passwort sicher mit SHA-256 hashen
-    const hashed = "sha256:" + await sha256(form.password)
-    const { error: accErr } = await supabase.from('accounts').insert({
-      id: tmpId, name: form.name.trim(),
-      password: hashed,
-      role: form.role, employee_id: employeeId,
-      email: form.email?.trim() || null,
+    const tmpId  = 'a' + Date.now()
+    const hashed = 'sha256:' + await sha256(form.password)
+    const { error } = await supabase.from('accounts').insert({
+      id: tmpId, name: form.name.trim(), password: hashed,
+      role: form.role, employee_id: employeeId, email: form.email?.trim() || null,
     })
-    if (accErr) throw accErr
+    if (error) throw error
   }
 
   const updateAccount = async (acc, updates, allAccounts) => {
     if (allAccounts.find(a => a.id !== acc.id && a.name.toLowerCase() === updates.name.trim().toLowerCase()))
       throw new Error('Dieser Name ist bereits vergeben.')
-
-    const patch = { name: updates.name.trim(), email: updates.email?.trim() || null }
-    await supabase.from('accounts').update(patch).eq('id', acc.id)
-
-    if (acc.employeeId)
-      await supabase.from('employees').update({ name: updates.name.trim(), avatar: mkInitials(updates.name) }).eq('id', acc.employeeId)
-
-    // Neues Passwort nur wenn angegeben
-    if (updates.newPassword?.trim()) {
-      const hashed = "sha256:" + await sha256(updates.newPassword.trim())
-      await supabase.from("accounts").update({ password: hashed }).eq("id", acc.id)
+    await supabase.from('accounts').update({ name: updates.name.trim(), email: updates.email?.trim() || null }).eq('id', acc.id)
+    if (acc.employeeId) {
+      const patch = { name: updates.name.trim(), avatar: mkInitials(updates.name) }
+      if (updates.categories?.length) {
+        patch.categories = updates.categories
+        patch.category = updates.categories[0]
+      }
+      await supabase.from('employees').update(patch).eq('id', acc.employeeId)
     }
-  }
-
-  const updateEmployeeCategory = async (empId, category) => {
-    await supabase.from('employees').update({ category }).eq('id', empId)
+    if (updates.newPassword?.trim()) {
+      const hashed = 'sha256:' + await sha256(updates.newPassword.trim())
+      await supabase.from('accounts').update({ password: hashed }).eq('id', acc.id)
+    }
   }
 
   const deleteAccount = async (acc, allAccounts) => {
@@ -306,12 +269,13 @@ export default function useData() {
   }
 
   return {
-    shifts, employees, rooms, accounts, notifications, loading, error,
+    shifts, employees, rooms, accounts, notifications, unavailable, loading, error,
     login, markAllRead, clearNotif,
     addShift, addShiftsBulk, updateShift,
     deleteShift, assignEmployee, unassignEmployee, changeRoom,
     applyForShift, withdrawApplication,
+    addUnavailableDay, removeUnavailableDay,
     addRoom, deleteRoom,
-    addAccount, updateAccount, updateEmployeeCategory, deleteAccount,
+    addAccount, updateAccount, deleteAccount,
   }
 }

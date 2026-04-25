@@ -2,7 +2,6 @@ export const S = {
   root:      { minHeight:'100vh', background:'#F5F3EE', color:'#1a1a1a', fontFamily:"'Georgia', serif", position:'relative' },
   bgPattern: { position:'fixed', inset:0, backgroundImage:'radial-gradient(circle at 20% 50%, #FFF8E7 0%, transparent 55%), radial-gradient(circle at 80% 20%, #E8F6F5 0%, transparent 55%)', pointerEvents:'none', zIndex:0 },
 
-  /* header */
   header:       { display:'flex', alignItems:'center', justifyContent:'space-between', padding:'12px 16px', borderBottom:'1px solid #E0DBD0', position:'relative', zIndex:10, background:'#FFFDF8', flexWrap:'wrap', gap:8 },
   logoTitle:    { fontSize:18, fontWeight:700, letterSpacing:3, color:'#1a1a1a' },
   logoSub:      { fontSize:9, color:'#999', letterSpacing:2, textTransform:'uppercase' },
@@ -14,7 +13,6 @@ export const S = {
   bellBtn:      { position:'relative', padding:'7px 9px', background:'transparent', border:'1px solid #D5CFC4', borderRadius:8, cursor:'pointer', fontSize:16, lineHeight:1 },
   bellBadge:    { position:'absolute', top:-6, right:-6, background:'#E07070', color:'#fff', fontSize:10, fontWeight:700, borderRadius:10, padding:'2px 5px', minWidth:16, textAlign:'center', lineHeight:'14px' },
 
-  /* notifications */
   notifPanel:      { position:'fixed', top:60, right:8, left:8, background:'#FFFDF8', border:'1px solid #E0DBD0', borderRadius:14, boxShadow:'0 8px 32px rgba(0,0,0,0.15)', zIndex:200, overflow:'hidden' },
   notifPanelHdr:   { display:'flex', alignItems:'center', justifyContent:'space-between', padding:'12px 14px 8px', borderBottom:'1px solid #EDE8DF' },
   notifPanelTitle: { fontSize:14, fontWeight:700, color:'#1a1a1a' },
@@ -29,24 +27,20 @@ export const S = {
   notifTime:       { fontSize:10, color:'#bbb' },
   notifDismiss:    { background:'transparent', border:'none', color:'#ccc', cursor:'pointer', fontSize:13, padding:'2px 4px', flexShrink:0 },
 
-  /* stats */
   statsBar: { display:'flex', gap:1, background:'#FFFDF8', borderBottom:'1px solid #E0DBD0', position:'relative', zIndex:1, overflowX:'auto' },
-  statCard: { flex:1, minWidth:90, display:'flex', alignItems:'center', gap:6, padding:'8px 10px', borderRight:'1px solid #E0DBD0' },
+  statCard: { flex:'0 0 auto', minWidth:90, display:'flex', alignItems:'center', gap:6, padding:'8px 10px', borderRight:'1px solid #E0DBD0' },
   statNum:  { fontSize:14, fontWeight:700, color:'#1a1a1a' },
   statChip: { marginLeft:'auto', fontSize:10, color:'#888', background:'#EDE8DF', padding:'2px 6px', borderRadius:10 },
 
-  /* layout */
   main:    { position:'relative', zIndex:1, maxWidth:1100, margin:'0 auto', padding:'0 12px 40px' },
   content: { paddingTop:16 },
 
-  /* tabs */
   tabBar:     { display:'flex', gap:0, marginBottom:16, borderBottom:'2px solid #E0DBD0', overflowX:'auto' },
   tab:        { padding:'9px 16px', background:'transparent', border:'none', color:'#aaa', cursor:'pointer', fontSize:13, fontFamily:'inherit', borderBottom:'2px solid transparent', marginBottom:-2, whiteSpace:'nowrap' },
   tabActive:  { padding:'9px 16px', background:'transparent', border:'none', color:'#C8960A', cursor:'pointer', fontSize:13, fontWeight:700, fontFamily:'inherit', borderBottom:'2px solid #C8960A', marginBottom:-2, whiteSpace:'nowrap' },
   tab2:       { padding:'7px 14px', background:'transparent', border:'none', color:'#bbb', cursor:'pointer', fontSize:12, fontFamily:'inherit', borderBottom:'2px solid transparent', marginBottom:-2, whiteSpace:'nowrap' },
   tabActive2: { padding:'7px 14px', background:'transparent', border:'none', color:'#6B8FB5', cursor:'pointer', fontSize:12, fontWeight:700, fontFamily:'inherit', borderBottom:'2px solid #6B8FB5', marginBottom:-2, whiteSpace:'nowrap' },
 
-  /* section headers */
   sectionHeader: { display:'flex', alignItems:'flex-start', justifyContent:'space-between', marginBottom:16, gap:10, flexWrap:'wrap' },
   sectionTitle:  { fontSize:18, fontWeight:700, color:'#1a1a1a', marginBottom:8, letterSpacing:1 },
   subTitle:      { fontSize:14, color:'#888', marginBottom:10, marginTop:20, letterSpacing:1 },
@@ -56,8 +50,14 @@ export const S = {
   actionBtns:    { display:'flex', gap:8, flexWrap:'wrap' },
   addBtn:        { padding:'8px 16px', background:'#C8960A', border:'none', color:'#fff', borderRadius:8, cursor:'pointer', fontSize:13, fontWeight:700, fontFamily:'inherit', whiteSpace:'nowrap' },
 
-  /* shift cards */
-  shiftGrid:    { display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(280px, 1fr))', gap:12 },
+  // Grouped shifts by date
+  dayGroup:       { marginBottom:20 },
+  dayGroupHeader: { display:'flex', alignItems:'center', gap:10, marginBottom:10, paddingBottom:6, borderBottom:'2px solid #E0DBD0' },
+  dayGroupDate:   { fontSize:15, fontWeight:700, color:'#1a1a1a' },
+  dayGroupCount:  { fontSize:11, color:'#aaa', background:'#EDE8DF', padding:'2px 8px', borderRadius:10 },
+  dayGroupUnavail:{ fontSize:11, color:'#E07070', background:'#FFE8E8', padding:'2px 8px', borderRadius:10 },
+  shiftGrid:      { display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(260px, 1fr))', gap:10 },
+
   shiftCard:    { background:'#FFFDF8', border:'1px solid #E0DBD0', borderRadius:10, padding:14, boxShadow:'0 2px 8px rgba(0,0,0,0.05)' },
   shiftCardTop: { display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:6 },
   shiftMeta:    { display:'flex', gap:6, alignItems:'center', flexWrap:'wrap' },
@@ -69,14 +69,12 @@ export const S = {
   editRoomBtn:  { padding:'2px 6px', background:'transparent', border:'1px solid #E0DBD0', borderRadius:6, cursor:'pointer', fontSize:11, color:'#bbb' },
   templateBadge:{ display:'inline-flex', alignItems:'center', gap:4, fontSize:11, padding:'2px 8px', borderRadius:10, background:'#E8C54722', color:'#8a6800', fontWeight:600, border:'1px solid #E8C54744', marginBottom:6 },
 
-  /* inline room picker */
   roomPicker:      { background:'#F5F3EE', border:'1px solid #E0DBD0', borderRadius:8, padding:'10px 12px', marginBottom:8 },
   roomPickerLabel: { fontSize:11, color:'#aaa', letterSpacing:1, textTransform:'uppercase', marginBottom:6 },
   rpOpt:       { display:'inline-block', margin:'3px 4px 3px 0', padding:'4px 10px', background:'#FFFDF8', border:'1px solid #D5CFC4', borderRadius:14, cursor:'pointer', fontSize:12, fontFamily:'inherit', color:'#555' },
   rpOptActive: { background:'#6B8FB522', border:'1px solid #6B8FB5', color:'#4a6f95', fontWeight:700 },
   rpCancel:    { display:'block', marginTop:6, padding:'4px 10px', background:'transparent', border:'1px solid #D5CFC4', borderRadius:6, cursor:'pointer', fontSize:11, color:'#aaa', fontFamily:'inherit' },
 
-  /* applicants / assign */
   deleteBtn:      { background:'transparent', border:'none', color:'#bbb', cursor:'pointer', fontSize:13, padding:2, lineHeight:1 },
   assignedBox:    { display:'flex', alignItems:'center', gap:8, background:'#EDF7F0', borderRadius:8, padding:'9px 11px' },
   assignedName:   { fontSize:13, fontWeight:600, flex:1, color:'#1a1a1a' },
@@ -89,23 +87,22 @@ export const S = {
   applicantInfo:  { flex:1 },
   applicantName:  { fontSize:13, fontWeight:600, color:'#1a1a1a' },
   assignBtn:      { padding:'4px 10px', background:'transparent', border:'1px solid', borderRadius:6, cursor:'pointer', fontSize:11, fontFamily:'inherit' },
+  unavailWarn:    { fontSize:11, color:'#E07070', background:'#FFE8E8', padding:'3px 8px', borderRadius:6, marginBottom:4, display:'inline-block' },
   empAvatar:      { width:32, height:32, borderRadius:'50%', background:'#EDE8DF', display:'flex', alignItems:'center', justifyContent:'center', fontSize:11, fontWeight:700, flexShrink:0, color:'#555' },
   applicantsCount:{ fontSize:12, color:'#aaa', marginBottom:8 },
   applyBtn:       { width:'100%', padding:'10px', border:'none', borderRadius:8, color:'#fff', fontWeight:700, cursor:'pointer', fontSize:14, fontFamily:'inherit' },
   withdrawBtn:    { width:'100%', padding:'10px', background:'transparent', border:'1px solid #D5CFC4', borderRadius:8, color:'#aaa', cursor:'pointer', fontSize:13, fontFamily:'inherit' },
 
-  /* team grid */
   empGrid:     { display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(140px, 1fr))', gap:10 },
   empCard:     { background:'#FFFDF8', border:'1px solid #E0DBD0', borderRadius:10, padding:14, display:'flex', flexDirection:'column', alignItems:'center', gap:5, textAlign:'center', boxShadow:'0 2px 6px rgba(0,0,0,0.04)' },
   empAvatarLg: { width:44, height:44, borderRadius:'50%', display:'flex', alignItems:'center', justifyContent:'center', fontSize:15, fontWeight:700 },
   empName:     { fontSize:12, fontWeight:700, color:'#1a1a1a' },
   empNotifDot: { position:'absolute', top:-4, right:-4, background:'#E07070', color:'#fff', fontSize:9, fontWeight:700, borderRadius:10, padding:'1px 4px', minWidth:14, textAlign:'center', lineHeight:'14px' },
+  empCatBadges:{ display:'flex', gap:3, flexWrap:'wrap', justifyContent:'center' },
 
-  /* profile banner */
   profileBanner: { display:'flex', alignItems:'center', gap:14, background:'#FFFDF8', border:'1px solid #E0DBD0', borderRadius:10, padding:'14px 16px', marginBottom:14, flexWrap:'wrap', boxShadow:'0 2px 8px rgba(0,0,0,0.05)' },
   profileName:   { fontSize:18, fontWeight:700, marginBottom:3, color:'#1a1a1a' },
 
-  /* accounts */
   accSection:      { background:'#FFFDF8', border:'1px solid #E0DBD0', borderRadius:12, padding:'14px 16px', boxShadow:'0 2px 6px rgba(0,0,0,0.04)' },
   accSectionTitle: { fontSize:12, fontWeight:700, color:'#888', letterSpacing:1, textTransform:'uppercase', marginBottom:12 },
   accRow:          { display:'flex', alignItems:'center', gap:10, padding:'9px 0', borderBottom:'1px solid #F0EDE6' },
@@ -117,20 +114,20 @@ export const S = {
   accDeleteBtn:    { background:'transparent', border:'none', color:'#ddd', cursor:'pointer', fontSize:15, padding:'2px 4px' },
   accErrorBox:     { marginTop:10, padding:'8px 12px', background:'#FFF0F0', border:'1px solid #F5C6C6', borderRadius:8, fontSize:12, color:'#E07070' },
 
-  /* calendar */
   calNav:      { display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:12, gap:8 },
   calNavBtn:   { padding:'6px 12px', background:'#FFFDF8', border:'1px solid #D5CFC4', borderRadius:8, cursor:'pointer', fontSize:12, fontFamily:'inherit', color:'#555' },
   calNavTitle: { fontSize:13, fontWeight:700, color:'#1a1a1a', textAlign:'center', flex:1 },
   calGrid:     { display:'grid', gridTemplateColumns:'repeat(7, 1fr)', gap:4 },
-  calDay:      { background:'#FFFDF8', border:'1px solid #E0DBD0', borderRadius:8, padding:'6px 4px', minHeight:90, boxShadow:'0 1px 4px rgba(0,0,0,0.04)' },
+  calDay:      { background:'#FFFDF8', border:'1px solid #E0DBD0', borderRadius:8, padding:'6px 4px', minHeight:90, boxShadow:'0 1px 4px rgba(0,0,0,0.04)', cursor:'pointer', position:'relative' },
   calDayToday: { border:'2px solid #C8960A', background:'#FFFBF0' },
+  calDayUnavail:{ background:'#FFF0F0', border:'1px solid #FFCCCC' },
   calDayHdr:   { display:'flex', flexDirection:'column', alignItems:'center', marginBottom:4, gap:1 },
   calDayName:  { fontSize:9, color:'#aaa', textTransform:'uppercase', letterSpacing:1 },
   calDayNum:   { fontSize:16, fontWeight:700, color:'#1a1a1a', lineHeight:1 },
+  calDayX:     { fontSize:14, color:'#E07070', lineHeight:1 },
   calEmpty:    { fontSize:10, color:'#ddd', textAlign:'center', marginTop:6 },
   calShift:    { borderRadius:4, padding:'4px 5px', marginBottom:3, cursor:'pointer' },
 
-  /* modals */
   overlay:      { position:'fixed', inset:0, background:'rgba(0,0,0,0.4)', display:'flex', alignItems:'flex-end', justifyContent:'center', zIndex:100, padding:0 },
   modal:        { background:'#FFFDF8', border:'1px solid #E0DBD0', borderRadius:'16px 16px 0 0', padding:'20px 18px 32px', width:'100%', maxWidth:600, boxShadow:'0 -8px 40px rgba(0,0,0,0.15)', maxHeight:'90vh', overflowY:'auto' },
   modalHandle:  { width:40, height:4, background:'#E0DBD0', borderRadius:2, margin:'0 auto 16px' },
@@ -139,22 +136,19 @@ export const S = {
   input:        { width:'100%', padding:'11px 12px', background:'#F5F3EE', border:'1px solid #D5CFC4', borderRadius:8, color:'#1a1a1a', fontSize:15, fontFamily:'inherit', boxSizing:'border-box' },
   select:       { width:'100%', padding:'11px 12px', background:'#F5F3EE', border:'1px solid #D5CFC4', borderRadius:8, color:'#1a1a1a', fontSize:15, fontFamily:'inherit', boxSizing:'border-box', appearance:'none' },
   catSelect:    { display:'flex', gap:6, flexWrap:'wrap', marginTop:6 },
-  catBtn:       { padding:'8px 14px', background:'#F0EDE6', border:'1px solid #D5CFC4', color:'#888', borderRadius:8, cursor:'pointer', fontSize:13, fontFamily:'inherit' },
+  catBtn:       { padding:'7px 12px', background:'#F0EDE6', border:'1px solid #D5CFC4', color:'#888', borderRadius:8, cursor:'pointer', fontSize:12, fontFamily:'inherit' },
   modalActions: { display:'flex', gap:10, marginTop:20 },
   cancelBtn:    { flex:1, padding:'12px', background:'transparent', border:'1px solid #D5CFC4', color:'#aaa', borderRadius:10, cursor:'pointer', fontFamily:'inherit', fontSize:14 },
   confirmBtn:   { flex:1, padding:'12px', background:'#C8960A', border:'none', color:'#fff', borderRadius:10, cursor:'pointer', fontWeight:700, fontFamily:'inherit', fontSize:14 },
 
-  /* counter widget for bulk shift add */
   counterRow:   { display:'flex', alignItems:'center', justifyContent:'space-between', padding:'10px 12px', background:'#F5F3EE', borderRadius:10, marginBottom:8 },
   counterLabel: { fontSize:14, fontWeight:600, color:'#1a1a1a' },
   counterBtns:  { display:'flex', alignItems:'center', gap:12 },
   counterBtn:   { width:34, height:34, borderRadius:'50%', border:'1px solid #D5CFC4', background:'#FFFDF8', cursor:'pointer', fontSize:18, display:'flex', alignItems:'center', justifyContent:'center', fontFamily:'inherit' },
   counterVal:   { fontSize:18, fontWeight:700, color:'#1a1a1a', minWidth:24, textAlign:'center' },
 
-  /* toast */
   toast:  { position:'fixed', bottom:28, left:'50%', transform:'translateX(-50%)', background:'#1a1a1a', color:'#fff', padding:'10px 22px', borderRadius:20, fontWeight:700, fontSize:14, zIndex:300, whiteSpace:'nowrap', boxShadow:'0 4px 20px rgba(0,0,0,0.2)' },
   empty:  { color:'#bbb', fontStyle:'italic', padding:20, gridColumn:'1/-1' },
-
   spinner:     { display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', minHeight:'100vh', background:'#F5F3EE', gap:16, fontFamily:"'Georgia', serif" },
   spinnerIcon: { fontSize:48 },
   spinnerText: { fontSize:14, color:'#aaa' },
