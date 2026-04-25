@@ -47,7 +47,7 @@ export default function App() {
   })
   const [newRoomName, setNewRoomName] = useState('')
   const [newRoomIcon, setNewRoomIcon] = useState('🏠')
-  const [newAccForm,  setNewAccForm]  = useState({ name:'', password:'', role:'employee', category:'service' })
+  const [newAccForm,  setNewAccForm]  = useState({ name:'', password:'', email:'', role:'employee', category:'service' })
   const [accError,    setAccError]    = useState('')
   const [toast, setToast] = useState(null)
 
@@ -318,7 +318,7 @@ export default function App() {
             <div style={S.accRole}>
               {cat && <span style={{ ...S.catBadge, background:cat.color+'22', color:cat.color }}>{cat.icon} {cat.label}</span>}
               {!cat && <span>Chef</span>}
-              &nbsp;{'•'.repeat(Math.min(acc.password.length, 8))}
+              {acc.email && <span style={{ color:'#6B8FB5', fontSize:11 }}>· {acc.email}</span>}
             </div>
           </div>
           <button style={S.accEditBtn} onClick={()=>{ setEditAccount({...acc}); setAccError('') }}>✏️</button>
@@ -334,7 +334,7 @@ export default function App() {
       <div>
         <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:16 }}>
           <h2 style={S.sectionTitle}>Account-Verwaltung</h2>
-          <button style={S.addBtn} onClick={()=>{ setNewAccForm({name:'',password:'',role:'employee',category:'service'}); setAccError(''); setShowAddAccount(true) }}>+ Account</button>
+          <button style={S.addBtn} onClick={()=>{ setNewAccForm({name:'',password:'',email:'',role:'employee',category:'service'}); setAccError(''); setShowAddAccount(true) }}>+ Account</button>
         </div>
         <div style={S.accSection}>
           <div style={S.accSectionTitle}>👨‍🍳 Chef-Accounts</div>
@@ -489,6 +489,7 @@ export default function App() {
     if (!editAccount) return null
     const emp = db.employees.find(e=>e.id===editAccount.employeeId)
     const [localCat, setLocalCat] = useState(emp?.category || 'service')
+    const [newPw, setNewPw] = useState('')
 
     return (
       <div style={S.overlay} onClick={()=>setEditAccount(null)}>
@@ -497,8 +498,10 @@ export default function App() {
           <h3 style={S.modalTitle}>✏️ Account bearbeiten</h3>
           <label style={S.label}>Name</label>
           <input style={S.input} value={editAccount.name} onChange={e=>setEditAccount({...editAccount,name:e.target.value})} />
-          <label style={S.label}>Passwort</label>
-          <input style={S.input} type="text" value={editAccount.password} onChange={e=>setEditAccount({...editAccount,password:e.target.value})} />
+          <label style={S.label}>E-Mail</label>
+          <input style={S.input} type="email" placeholder="fuer@benachrichtigungen.de" value={editAccount.email||''} onChange={e=>setEditAccount({...editAccount,email:e.target.value})} />
+          <label style={S.label}>Neues Passwort (leer lassen = unveränert)</label>
+          <input style={S.input} type="password" placeholder="Nur ausfüllen wenn ändern" value={newPw} onChange={e=>setNewPw(e.target.value)} />
           {editAccount.role==='employee' && emp && (
             <>
               <label style={S.label}>Kategorie</label>
@@ -510,7 +513,7 @@ export default function App() {
             <button style={S.cancelBtn} onClick={()=>setEditAccount(null)}>Abbrechen</button>
             <button style={S.confirmBtn} onClick={async()=>{
               try {
-                await db.updateAccount(editAccount, editAccount.name, editAccount.password, db.accounts)
+                await db.updateAccount(editAccount, { name: editAccount.name, email: editAccount.email, newPassword: newPw }, db.accounts)
                 if (editAccount.role==='employee' && emp && localCat!==emp.category)
                   await db.updateEmployeeCategory(emp.id, localCat)
                 setEditAccount(null); showToast('Account aktualisiert ✓')
@@ -752,8 +755,10 @@ export default function App() {
             <h3 style={S.modalTitle}>🔑 Account erstellen</h3>
             <label style={S.label}>Name</label>
             <input style={S.input} placeholder="Vor- und Nachname" value={newAccForm.name} onChange={e=>setNewAccForm({...newAccForm,name:e.target.value})} />
+            <label style={S.label}>E-Mail (für Benachrichtigungen)</label>
+            <input style={S.input} type="email" placeholder="mitarbeiter@restaurant.de" value={newAccForm.email} onChange={e=>setNewAccForm({...newAccForm,email:e.target.value})} />
             <label style={S.label}>Passwort</label>
-            <input style={S.input} type="text" placeholder="Passwort festlegen" value={newAccForm.password} onChange={e=>setNewAccForm({...newAccForm,password:e.target.value})} />
+            <input style={S.input} type="password" placeholder="Mindestens 4 Zeichen" value={newAccForm.password} onChange={e=>setNewAccForm({...newAccForm,password:e.target.value})} />
             <label style={S.label}>Rolle</label>
             <div style={S.catSelect}>
               {[{v:'employee',l:'👤 Mitarbeiter'},{v:'chef',l:'👨‍🍳 Chef'}].map(({v,l})=>(
