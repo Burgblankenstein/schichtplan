@@ -62,9 +62,38 @@ export default function useData() {
 
   /* ── AUTH via Edge Function ── */
   // Login: Passwortprüfung passiert sicher auf dem Server (bcrypt)
+  /* ── AUTH — direkt im Browser mit SHA-256 ── */
+  const sha256 = async (text) => {
+    const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text))
+    return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2,"0")).join("")
+  }
+
   const login = useCallback(async (name, password) => {
-    const data = await callFunction('auth-login', { name, password })
-    return mapAccount(data.account)
+    const hashedInput = "sha256:" + await sha256(password)
+
+    const { data: rows } = await supabase
+      .from("accounts")
+      .select("id,name,role,employee_id,email,password")
+      .ilike("name", name.trim())
+
+    const acc = rows?.[0]
+    if (!acc) throw new Error("Name oder Passwort falsch.")
+
+    let isValid = false
+    if (acc.password.startsWith("sha256:")) {
+      isValid = acc.password === hashedInput
+    } else {
+      // Legacy Klartext — vergleichen und sofort hashen
+      isValid = acc.password === password
+      if (isValid) {
+        await supabase.from("accounts").update({ password: hashedInput }).eq("id", acc.id)
+      }
+    }
+
+    if (!isValid) throw new Error("Name oder Passwort falsch.")
+
+    const { password: _, ...safe } = acc
+    return mapAccount(safe)
   }, [])
 
   /* ── EMAIL via Edge Function ── */
@@ -237,16 +266,15 @@ export default function useData() {
 
     // Passwort über Edge Function hashen
     const tmpId = 'a' + Date.now()
-    const { error } = await supabase.from('accounts').insert({
+    // Passwort sicher mit SHA-256 hashen
+    const hashed = "sha256:" + await sha256(form.password)
+    const { error: accErr } = await supabase.from('accounts').insert({
       id: tmpId, name: form.name.trim(),
-      password: 'PENDING', // wird gleich überschrieben
+      password: hashed,
       role: form.role, employee_id: employeeId,
       email: form.email?.trim() || null,
     })
-    if (error) throw error
-
-    // Passwort sicher hashen
-    await callFunction('auth-set-password', { accountId: tmpId, newPassword: form.password })
+    if (accErr) throw accErr
   }
 
   const updateAccount = async (acc, updates, allAccounts) => {
@@ -261,7 +289,8 @@ export default function useData() {
 
     // Neues Passwort nur wenn angegeben
     if (updates.newPassword?.trim()) {
-      await callFunction('auth-set-password', { accountId: acc.id, newPassword: updates.newPassword.trim() })
+      const hashed = "sha256:" + await sha256(updates.newPassword.trim())
+      await supabase.from("accounts").update({ password: hashed }).eq("id", acc.id)
     }
   }
 
