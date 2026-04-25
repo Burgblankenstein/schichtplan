@@ -7,6 +7,14 @@ export const CATEGORIES = {
 export const CHEF_ID = 'chef'
 export const WD = ['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So']
 
+export const SHIFT_TEMPLATES = [
+  { id: 'ala_carte',   label: 'à la Carte',  icon: '🍽️', defaultTime: '17:00 – 23:00' },
+  { id: 'hochzeit',    label: 'Hochzeit',     icon: '💍', defaultTime: '14:00 – 00:00' },
+  { id: 'ritteressen', label: 'Ritteressen',  icon: '⚔️', defaultTime: '18:00 – 23:00' },
+  { id: 'veranstaltung',label: 'Veranstaltung',icon: '🎉', defaultTime: '16:00 – 22:00' },
+  { id: 'custom',      label: 'Eigene…',      icon: '✏️', defaultTime: '' },
+]
+
 export function getMonday(d) {
   const x = new Date(d), day = x.getDay()
   x.setDate(x.getDate() + (day === 0 ? -6 : 1 - day))
