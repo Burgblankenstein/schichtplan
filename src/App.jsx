@@ -59,6 +59,7 @@ export default function App() {
   const [showAddAccount,  setShowAddAccount]  = useState(false)
   const [editAccount,     setEditAccount]     = useState(null)
   const [editShift,       setEditShift]       = useState(null)
+  const [assignShift,     setAssignShift]     = useState(null) // shift being assigned by chef
 
   const [bulkForm, setBulkForm] = useState({
     date:'', template:'ala_carte', customLabel:'', time:'17:00 – 23:00', room:'',
@@ -118,6 +119,65 @@ export default function App() {
     const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(new Blob([html],{type:'text/html'})), download:'schichtplan.html' })
     a.click()
     showToast('Wochenplan exportiert ✓')
+  }
+
+  /* ═══════════ ASSIGN SHIFT MODAL (Chef weist Mitarbeiter zu) ═══════════ */
+  const AssignShiftModal = () => {
+    if (!assignShift) return null
+    const live = db.shifts.find(s => s.id === assignShift.id) || assignShift
+    const cat  = CATEGORIES[live.category]
+    // eligible: employees who have this category
+    const eligible = db.employees.filter(e => (e.categories || []).includes(live.category))
+
+    return (
+      <div style={S.overlay} onClick={() => setAssignShift(null)}>
+        <div style={S.modal} onClick={e => e.stopPropagation()}>
+          <div style={S.modalHandle}/>
+          <h3 style={S.modalTitle}>👤 Mitarbeiter zuweisen</h3>
+          <div style={{ ...S.catBadge, background: cat.color+'22', color: cat.color, marginBottom:8, display:'inline-block' }}>
+            {cat.icon} {live.label} · {fmtShort(live.date)} · {live.time}
+          </div>
+
+          {eligible.length === 0 && (
+            <div style={S.noApplicants}>Keine Mitarbeiter mit dieser Position verfügbar.</div>
+          )}
+
+          {eligible.map(emp => {
+            const isAssigned   = live.assigned === emp.id
+            const hasApplied   = live.applicants.includes(emp.id)
+            const isUnavail    = db.unavailable.some(u => u.employeeId === emp.id && u.date === live.date)
+            const primCat      = CATEGORIES[emp.categories?.[0]] || CATEGORIES.service
+            const shiftsThisDay = db.shifts.filter(s => s.date === live.date && s.assigned === emp.id).length
+
+            return (
+              <div key={emp.id} style={{ ...S.applicantRow, padding:'10px 12px', background: isAssigned ? '#EDF7F0' : '#FFFDF8', borderRadius:10, border:'1px solid #E0DBD0', marginBottom:8 }}>
+                <div style={{ ...S.empAvatar, background: primCat.color+'33', color: primCat.color, width:38, height:38 }}>{emp.avatar}</div>
+                <div style={S.applicantInfo}>
+                  <div style={S.applicantName}>{emp.name}</div>
+                  <div style={{ display:'flex', gap:4, flexWrap:'wrap', marginTop:2 }}>
+                    {hasApplied && <span style={{ fontSize:10, color:'#2A9D6E', background:'#2A9D6E22', padding:'1px 6px', borderRadius:8 }}>✓ Beworben</span>}
+                    {isUnavail  && <span style={{ fontSize:10, color:'#E07070', background:'#FFE8E8', padding:'1px 6px', borderRadius:8 }}>⚠️ Abwesend</span>}
+                    {shiftsThisDay > 0 && <span style={{ fontSize:10, color:'#888', background:'#EDE8DF', padding:'1px 6px', borderRadius:8 }}>{shiftsThisDay}x eingeteilt</span>}
+                  </div>
+                </div>
+                {isAssigned ? (
+                  <button style={S.unassignBtn} onClick={async () => { await db.unassignEmployee(live.id); showToast('Einteilung rückgängig'); setAssignShift(null) }}>↩ Entfernen</button>
+                ) : (
+                  <button style={{ ...S.assignBtn, borderColor: cat.color, color: cat.color, padding:'6px 12px', fontSize:12 }}
+                    onClick={async () => { await db.assignEmployee(live.id, emp.id, live); showToast(`${emp.name} eingeteilt ✓`); setAssignShift(null) }}>
+                    Einteilen
+                  </button>
+                )}
+              </div>
+            )
+          })}
+
+          <div style={S.modalActions}>
+            <button style={{ ...S.cancelBtn, flex:'unset', width:'100%' }} onClick={() => setAssignShift(null)}>Schließen</button>
+          </div>
+        </div>
+      </div>
+    )
   }
 
   if (db.loading) return <div style={S.spinner}><div style={S.spinnerIcon}>🍴</div><div style={S.spinnerText}>Wird geladen…</div></div>
@@ -185,9 +245,15 @@ export default function App() {
             </div>
           ) : (
             <div style={S.applicantsBox}>
-              <div style={S.applicantsLabel}>Bewerber ({live.applicants.length})</div>
+              <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:6 }}>
+                <div style={S.applicantsLabel}>Bewerber ({live.applicants.length})</div>
+                <button style={{ ...S.assignBtn, borderColor: cat.color, color: cat.color, padding:'4px 10px' }}
+                  onClick={() => setAssignShift(live)}>
+                  👤 Zuweisen
+                </button>
+              </div>
               {live.applicants.length===0 && <div style={S.noApplicants}>Noch keine Bewerbungen</div>}
-              {live.applicants.map(eid => {
+              {live.applicants.slice(0,2).map(eid => {
                 const emp=getEmp(eid); if(!emp) return null
                 const ec=CATEGORIES[emp.categories?.[0] || 'service']
                 const isUnavail = db.unavailable.some(u => u.employeeId === eid && u.date === live.date)
@@ -198,13 +264,14 @@ export default function App() {
                       <div style={S.applicantName}>{emp.name}</div>
                       {isUnavail && <span style={S.unavailWarn}>⚠️ Abwesend</span>}
                     </div>
-                    <button style={{ ...S.assignBtn, borderColor:cat.color, color:cat.color }}
-                      onClick={async () => { await db.assignEmployee(live.id,eid,live); showToast('Mitarbeiter eingeteilt ✓') }}>
-                      Einteilen
-                    </button>
                   </div>
                 )
               })}
+              {live.applicants.length > 2 && (
+                <div style={{ fontSize:11, color:'#aaa', textAlign:'center', marginTop:4 }}>
+                  +{live.applicants.length - 2} weitere → Zuweisen
+                </div>
+              )}
             </div>
           )
         )}
@@ -753,6 +820,7 @@ export default function App() {
       {showBulkShift  && <BulkShiftModal/>}
       {editShift      && <EditShiftModal/>}
       {editAccount    && <EditAccountModal/>}
+      {assignShift    && <AssignShiftModal/>}
 
       {/* Räume Modal */}
       {showManageRooms && (

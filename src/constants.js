@@ -20,12 +20,15 @@ export const SHIFT_TEMPLATES = [
 export function getMonday(d) {
   const x = new Date(d), day = x.getDay()
   x.setDate(x.getDate() + (day === 0 ? -6 : 1 - day))
-  x.setHours(0, 0, 0, 0)
+  x.setHours(12, 0, 0, 0) // mittags setzen um Timezone-Probleme zu vermeiden
   return x
 }
-export const addDays   = (d, n) => { const x = new Date(d); x.setDate(x.getDate() + n); return x }
-export const toDS      = d  => d.toISOString().slice(0, 10)
-export const fmtLong   = ds => new Date(ds).toLocaleDateString('de-DE', { weekday:'long',  day:'2-digit', month:'long' })
-export const fmtShort  = ds => new Date(ds).toLocaleDateString('de-DE', { weekday:'short', day:'2-digit', month:'2-digit' })
+export const addDays = (d, n) => { const x = new Date(d); x.setDate(x.getDate() + n); return x }
+// Datum-String (YYYY-MM-DD) sicher parsen ohne Timezone-Verschiebung
+const parseDate = ds => { const [y,m,d] = ds.split('-').map(Number); return new Date(y, m-1, d) }
+
+export const toDS      = d  => { const x = new Date(d); return `${x.getFullYear()}-${String(x.getMonth()+1).padStart(2,'0')}-${String(x.getDate()).padStart(2,'0')}` }
+export const fmtLong   = ds => parseDate(ds).toLocaleDateString('de-DE', { weekday:'long',  day:'2-digit', month:'long' })
+export const fmtShort  = ds => parseDate(ds).toLocaleDateString('de-DE', { weekday:'short', day:'2-digit', month:'2-digit' })
 export const fmtTime   = iso => new Date(iso).toLocaleTimeString('de-DE', { hour:'2-digit', minute:'2-digit' })
 export const mkInitials = name => name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2)

@@ -75,18 +75,6 @@ export default function LoginScreen({ onLogin }) {
         <button style={{ ...LS.loginBtn, opacity: loading ? 0.7 : 1 }} onClick={handleLogin} disabled={loading}>
           {loading ? 'Wird angemeldet…' : 'Anmelden →'}
         </button>
-
-        <div style={LS.hint}>
-          <div style={LS.hintTitle}>Demo-Zugänge</div>
-          <div style={LS.hintRow}>
-            <span style={LS.hintRole}>👨‍🍳 Chef</span>
-            <span style={LS.hintCred}>Chef / chef123</span>
-          </div>
-          <div style={LS.hintRow}>
-            <span style={LS.hintRole}>👤 Mitarbeiter</span>
-            <span style={LS.hintCred}>Anna Müller / anna123</span>
-          </div>
-        </div>
       </div>
     </div>
   )
