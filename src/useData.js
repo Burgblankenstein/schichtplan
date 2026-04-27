@@ -1,4 +1,3 @@
-
 import { useState, useEffect, useCallback } from 'react'
 import { supabase } from './supabase'
 import { mkInitials, fmtShort, CHEF_ID, CATEGORIES } from './constants'
@@ -180,6 +179,22 @@ export default function useData() {
   const unassignEmployee = async (sid) => supabase.from('shifts').update({ assigned: null }).eq('id', sid)
   const changeRoom       = async (sid, roomId) => supabase.from('shifts').update({ room: roomId || null }).eq('id', sid)
 
+  const declineShift = async (shiftId, shift, employee) => {
+    // Remove assignment and remove from applicants
+    await supabase.from('shifts').update({
+      assigned: null,
+      applicants: shift.applicants.filter(id => id !== employee.id)
+    }).eq('id', shiftId)
+    // Notify chef
+    const cat = CATEGORIES[shift.category]
+    await pushNotif(
+      CHEF_ID, 'declined',
+      `${employee.name} hat die Schicht „${shift.label}" am ${fmtShort(shift.date)} abgelehnt!`,
+      shiftId,
+      { employeeName: employee.name, shiftLabel: shift.label, shiftDate: fmtShort(shift.date), shiftTime: shift.time, shiftIcon: cat.icon, category: cat.label, room: rooms.find(r => r.id === shift.room)?.name || '' }
+    )
+  }
+
   const applyForShift = async (shiftId, shift, employee) => {
     if (shift.applicants.includes(employee.id)) return
     await supabase.from('shifts').update({ applicants: [...shift.applicants, employee.id] }).eq('id', shiftId)
@@ -273,7 +288,7 @@ export default function useData() {
     shifts, employees, rooms, accounts, notifications, unavailable, loading, error,
     login, markAllRead, clearNotif,
     addShift, addShiftsBulk, updateShift,
-    deleteShift, assignEmployee, unassignEmployee, changeRoom,
+    deleteShift, assignEmployee, unassignEmployee, declineShift, changeRoom,
     applyForShift, withdrawApplication,
     addUnavailableDay, removeUnavailableDay,
     addRoom, deleteRoom,

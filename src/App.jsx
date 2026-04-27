@@ -4,8 +4,8 @@ import useData from './useData'
 import { S } from './styles'
 import { CATEGORIES, CHEF_ID, WD, SHIFT_TEMPLATES, getMonday, addDays, toDS, fmtLong, fmtShort, fmtTime, mkInitials } from './constants'
 
-const notifIcon  = t => ({ application:'📬', assigned:'🎉', new_shift:'📋' }[t] || '🔔')
-const notifColor = t => ({ application:'#C8960A', assigned:'#2A9D6E', new_shift:'#6B8FB5' }[t] || '#888')
+const notifIcon  = t => ({ application:'📬', assigned:'🎉', new_shift:'📋', declined:'❌' }[t] || '🔔')
+const notifColor = t => ({ application:'#C8960A', assigned:'#2A9D6E', new_shift:'#6B8FB5', declined:'#E07070' }[t] || '#888')
 
 /* ── Category pills — supports multi-select ── */
 const CatPills = ({ value, onChange, multi = false }) => (
@@ -90,14 +90,22 @@ export default function App() {
       (filterRoom === 'all' || s.room     === filterRoom) &&
       (!showOnlyFuture || s.date >= today)
     )
-    // group by date
     const groups = {}
     list.forEach(s => {
       if (!groups[s.date]) groups[s.date] = []
       groups[s.date].push(s)
     })
+    // Sort shifts within each day by room name then by time
+    Object.values(groups).forEach(shifts => {
+      shifts.sort((a, b) => {
+        const roomA = db.rooms.find(r => r.id === a.room)?.name || '~' // no room goes last
+        const roomB = db.rooms.find(r => r.id === b.room)?.name || '~'
+        if (roomA !== roomB) return roomA.localeCompare(roomB)
+        return a.time.localeCompare(b.time)
+      })
+    })
     return Object.entries(groups).sort(([a],[b]) => a.localeCompare(b))
-  }, [db.shifts, filterCat, filterRoom, showOnlyFuture, today])
+  }, [db.shifts, db.rooms, filterCat, filterRoom, showOnlyFuture, today])
 
   // Employee's categories
   const empCategories = activeEmployee?.categories || []
@@ -279,12 +287,25 @@ export default function App() {
         {isEmployee && !editing && (
           <>
             <div style={S.applicantsCount}>👥 {live.applicants.length} Bewerber</div>
-            {live.assigned
-              ? <div style={{ ...S.assignedBadge, padding:'8px', textAlign:'center', borderRadius:8 }}>✓ Besetzt</div>
-              : hasApplied
-                ? <button style={S.withdrawBtn} onClick={async () => { await db.withdrawApplication(live.id,live,activeEmployee.id); showToast('Bewerbung zurückgezogen') }}>Bewerbung zurückziehen</button>
-                : <button style={{ ...S.applyBtn, background:cat.color }} onClick={async () => { await db.applyForShift(live.id,live,activeEmployee); showToast('Bewerbung eingereicht ✓') }}>Bewerben</button>
-            }
+            {live.assigned === activeEmployee?.id ? (
+              // Employee is assigned — can confirm or decline
+              <div style={{ display:'flex', flexDirection:'column', gap:6 }}>
+                <div style={{ ...S.assignedBadge, padding:'8px', textAlign:'center', borderRadius:8 }}>✓ Du bist eingeteilt</div>
+                <button style={{ ...S.withdrawBtn, color:'#E07070', borderColor:'#E07070' }}
+                  onClick={async () => {
+                    await db.declineShift(live.id, live, activeEmployee)
+                    showToast('Schicht abgelehnt')
+                  }}>
+                  ✕ Ablehnen
+                </button>
+              </div>
+            ) : live.assigned ? (
+              <div style={{ ...S.assignedBadge, padding:'8px', textAlign:'center', borderRadius:8 }}>✓ Besetzt</div>
+            ) : hasApplied ? (
+              <button style={S.withdrawBtn} onClick={async () => { await db.withdrawApplication(live.id,live,activeEmployee.id); showToast('Bewerbung zurückgezogen') }}>Bewerbung zurückziehen</button>
+            ) : (
+              <button style={{ ...S.applyBtn, background:cat.color }} onClick={async () => { await db.applyForShift(live.id,live,activeEmployee); showToast('Bewerbung eingereicht ✓') }}>Bewerben</button>
+            )}
           </>
         )}
       </div>
@@ -471,68 +492,115 @@ export default function App() {
     )
   }
 
-  /* ═══════════ BULK SHIFT MODAL ═══════════ */
+  /* ═══════════ BULK SHIFT MODAL (neue Version mit individuellen Zeiten) ═══════════ */
   const BulkShiftModal = () => {
-    const [form, setForm] = useState(bulkForm)
-    const selectedTmpl = SHIFT_TEMPLATES.find(t=>t.id===form.template) || SHIFT_TEMPLATES[0]
-    const total = Object.values(form.counts).reduce((a,b)=>a+b,0)
+    const [date,      setDate]      = useState('')
+    const [template,  setTemplate]  = useState('ala_carte')
+    const [customLabel,setCustomLabel] = useState('')
+    const [room,      setRoom]      = useState('')
+    // slots: array of { cat, time }
+    const [slots, setSlots] = useState([])
+
+    const selectedTmpl = SHIFT_TEMPLATES.find(t => t.id === template) || SHIFT_TEMPLATES[0]
+    const defaultTime  = selectedTmpl.defaultTime || '17:00 – 23:00'
+
+    const addSlot = (cat) => {
+      setSlots(s => [...s, { id: Date.now() + Math.random(), cat, time: defaultTime }])
+    }
+    const removeSlot = (id) => setSlots(s => s.filter(x => x.id !== id))
+    const updateTime = (id, time) => setSlots(s => s.map(x => x.id === id ? { ...x, time } : x))
+
+    // counts per category for display
+    const counts = Object.fromEntries(Object.keys(CATEGORIES).map(k => [k, slots.filter(s => s.cat === k).length]))
 
     const handleSubmit = async () => {
-      if (!form.date) { showToast('Bitte Datum auswählen'); return }
-      if (total===0)  { showToast('Mindestens 1 Person auswählen'); return }
-      const label = form.template==='custom' ? (form.customLabel||'Schicht') : selectedTmpl.label
-      const shifts = []
-      for (const [cat, count] of Object.entries(form.counts))
-        for (let i=0; i<count; i++)
-          shifts.push({ date:form.date, label, time:form.time, category:cat, room:form.room })
+      if (!date)          { showToast('Bitte Datum auswählen'); return }
+      if (slots.length===0) { showToast('Mindestens 1 Person auswählen'); return }
+      const label = template === 'custom' ? (customLabel || 'Schicht') : selectedTmpl.label
+      const shifts = slots.map(s => ({ date, label, time: s.time, category: s.cat, room }))
       await db.addShiftsBulk(shifts, db.employees)
-      setBulkForm(form)
       setShowBulkShift(false)
-      showToast(`${shifts.length} Schicht${shifts.length>1?'en':''} erstellt ✓`)
+      showToast(`${shifts.length} Schicht${shifts.length > 1 ? 'en' : ''} erstellt ✓`)
     }
 
     return (
-      <div style={S.overlay} onClick={()=>setShowBulkShift(false)}>
-        <div style={S.modal} onClick={e=>e.stopPropagation()}>
+      <div style={S.overlay} onClick={() => setShowBulkShift(false)}>
+        <div style={{ ...S.modal, maxHeight:'92vh' }} onClick={e => e.stopPropagation()}>
           <div style={S.modalHandle}/>
           <h3 style={S.modalTitle}>+ Schichten anlegen</h3>
+
+          {/* Basis-Felder */}
           <label style={S.label}>Datum</label>
-          <input style={S.input} type="date" value={form.date} onChange={e=>setForm({...form,date:e.target.value})} />
+          <input style={S.input} type="date" value={date} onChange={e => setDate(e.target.value)} />
+
           <label style={S.label}>Vorlage</label>
-          <select style={S.select} value={form.template}
-            onChange={e=>{ const t=SHIFT_TEMPLATES.find(x=>x.id===e.target.value); setForm({...form,template:e.target.value,time:t?.defaultTime||form.time}) }}>
-            {SHIFT_TEMPLATES.map(t=><option key={t.id} value={t.id}>{t.icon} {t.label}</option>)}
+          <select style={S.select} value={template}
+            onChange={e => { setTemplate(e.target.value) }}>
+            {SHIFT_TEMPLATES.map(t => <option key={t.id} value={t.id}>{t.icon} {t.label}</option>)}
           </select>
-          {form.template==='custom' && (
+
+          {template === 'custom' && (
             <>
               <label style={S.label}>Bezeichnung</label>
-              <input style={S.input} placeholder="z.B. Firmenfeier" value={form.customLabel} onChange={e=>setForm({...form,customLabel:e.target.value})} />
+              <input style={S.input} placeholder="z.B. Firmenfeier" value={customLabel} onChange={e => setCustomLabel(e.target.value)} />
             </>
           )}
-          <label style={S.label}>Uhrzeit</label>
-          <input style={S.input} value={form.time} onChange={e=>setForm({...form,time:e.target.value})} />
+
           <label style={S.label}>Raum (optional)</label>
-          <select style={S.select} value={form.room} onChange={e=>setForm({...form,room:e.target.value})}>
+          <select style={S.select} value={room} onChange={e => setRoom(e.target.value)}>
             <option value="">— Kein Raum</option>
-            {db.rooms.map(r=><option key={r.id} value={r.id}>{r.icon} {r.name}</option>)}
+            {db.rooms.map(r => <option key={r.id} value={r.id}>{r.icon} {r.name}</option>)}
           </select>
+
+          {/* Personenauswahl */}
           <label style={S.label}>Benötigte Personen</label>
-          {Object.entries(CATEGORIES).map(([cat,val])=>(
+          {Object.entries(CATEGORIES).map(([cat, val]) => (
             <div key={cat} style={S.counterRow}>
-              <span style={{ ...S.counterLabel, color:val.color }}>{val.icon} {val.label}</span>
+              <span style={{ ...S.counterLabel, color: val.color }}>{val.icon} {val.label}</span>
               <div style={S.counterBtns}>
-                <button style={S.counterBtn} onClick={()=>setForm(f=>({...f,counts:{...f.counts,[cat]:Math.max(0,f.counts[cat]-1)}}))}>−</button>
-                <span style={S.counterVal}>{form.counts[cat]}</span>
-                <button style={S.counterBtn} onClick={()=>setForm(f=>({...f,counts:{...f.counts,[cat]:f.counts[cat]+1}}))}>+</button>
+                <button style={S.counterBtn} onClick={() => {
+                  // remove last slot of this cat
+                  const idx = [...slots].reverse().findIndex(s => s.cat === cat)
+                  if (idx >= 0) removeSlot([...slots].reverse()[idx].id)
+                }}>−</button>
+                <span style={S.counterVal}>{counts[cat]}</span>
+                <button style={S.counterBtn} onClick={() => addSlot(cat)}>+</button>
               </div>
             </div>
           ))}
-          <div style={{ fontSize:12, color:'#aaa', textAlign:'center', marginTop:4 }}>
-            {total>0 ? `${total} Schicht${total>1?'en':''} werden erstellt` : 'Noch keine Personen ausgewählt'}
+
+          {/* Individuelle Uhrzeiten */}
+          {slots.length > 0 && (
+            <>
+              <label style={{ ...S.label, marginTop: 16 }}>Individuelle Uhrzeiten</label>
+              <div style={{ display:'flex', flexDirection:'column', gap:6 }}>
+                {slots.map((slot, i) => {
+                  const cat = CATEGORIES[slot.cat]
+                  return (
+                    <div key={slot.id} style={{ display:'flex', alignItems:'center', gap:8, padding:'8px 10px', background:'#F5F3EE', borderRadius:8 }}>
+                      <span style={{ ...S.catBadge, background: cat.color+'22', color: cat.color, flexShrink:0 }}>{cat.icon} {cat.label}</span>
+                      <span style={{ fontSize:12, color:'#aaa', flexShrink:0 }}>#{slots.filter(s => s.cat === slot.cat && slots.indexOf(s) <= i).length}</span>
+                      <input
+                        style={{ ...S.input, flex:1, padding:'7px 10px', fontSize:13 }}
+                        placeholder="z.B. 17:00 – 23:00"
+                        value={slot.time}
+                        onChange={e => updateTime(slot.id, e.target.value)}
+                      />
+                      <button style={{ ...S.deleteBtn, color:'#CC7B7B', fontSize:16 }} onClick={() => removeSlot(slot.id)}>✕</button>
+                    </div>
+                  )
+                })}
+              </div>
+            </>
+          )}
+
+          <div style={{ fontSize:12, color:'#aaa', textAlign:'center', marginTop:8 }}>
+            {slots.length > 0 ? `${slots.length} Schicht${slots.length > 1 ? 'en' : ''} werden erstellt` : 'Noch keine Personen ausgewählt'}
           </div>
+
           <div style={S.modalActions}>
-            <button style={S.cancelBtn} onClick={()=>setShowBulkShift(false)}>Abbrechen</button>
-            <button style={{ ...S.confirmBtn, opacity:total===0?0.5:1 }} onClick={handleSubmit}>Erstellen</button>
+            <button style={S.cancelBtn} onClick={() => setShowBulkShift(false)}>Abbrechen</button>
+            <button style={{ ...S.confirmBtn, opacity: slots.length === 0 ? 0.5 : 1 }} onClick={handleSubmit}>Erstellen</button>
           </div>
         </div>
       </div>
