@@ -129,6 +129,122 @@ export default function App() {
     showToast('Wochenplan exportiert ✓')
   }
 
+  /* ═══════════ MEIN KONTO TAB (Mitarbeiter) ═══════════ */
+  const MeinKontoTab = () => {
+    const myAccount = db.accounts.find(a => a.id === currentAccount.id)
+    const [email,   setEmail]   = useState(myAccount?.email || '')
+    const [oldPw,   setOldPw]   = useState('')
+    const [newPw,   setNewPw]   = useState('')
+    const [newPw2,  setNewPw2]  = useState('')
+    const [saving,  setSaving]  = useState(false)
+    const [msg,     setMsg]     = useState(null) // { type: 'ok'|'err', text }
+
+    const sha256 = async (text) => {
+      const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text))
+      return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2,'0')).join('')
+    }
+
+    const handleSave = async () => {
+      setMsg(null)
+      setSaving(true)
+      try {
+        // Passwort ändern?
+        if (newPw || oldPw) {
+          if (!oldPw) { setMsg({ type:'err', text:'Bitte aktuelles Passwort eingeben.' }); return }
+          if (!newPw)  { setMsg({ type:'err', text:'Bitte neues Passwort eingeben.' }); return }
+          if (newPw !== newPw2) { setMsg({ type:'err', text:'Neue Passwörter stimmen nicht überein.' }); return }
+          if (newPw.length < 4) { setMsg({ type:'err', text:'Passwort muss mindestens 4 Zeichen haben.' }); return }
+
+          // Altes Passwort prüfen
+          const { data: rows } = await import('./supabase').then(m =>
+            m.supabase.from('accounts').select('password').eq('id', currentAccount.id)
+          )
+          const stored = rows?.[0]?.password || ''
+          const oldHashed = 'sha256:' + await sha256(oldPw)
+          const oldValid  = stored.startsWith('sha256:') ? stored === oldHashed : stored === oldPw
+          if (!oldValid) { setMsg({ type:'err', text:'Aktuelles Passwort ist falsch.' }); return }
+
+          await db.updateAccount(currentAccount, { name: currentAccount.name, email, newPassword: newPw }, db.accounts)
+        } else {
+          // Nur E-Mail ändern
+          await db.updateAccount(currentAccount, { name: currentAccount.name, email, newPassword: '' }, db.accounts)
+        }
+
+        // Lokalen Account-State aktualisieren
+        setCurrentAccount(acc => ({ ...acc, email }))
+        setOldPw(''); setNewPw(''); setNewPw2('')
+        setMsg({ type:'ok', text:'Gespeichert ✓' })
+      } catch(e) {
+        setMsg({ type:'err', text: e.message })
+      } finally {
+        setSaving(false)
+      }
+    }
+
+    const primCat = CATEGORIES[activeEmployee?.categories?.[0]] || CATEGORIES.service
+
+    return (
+      <div style={{ maxWidth: 480 }}>
+        {/* Profil-Kopf */}
+        <div style={{ ...S.profileBanner, marginBottom: 24 }}>
+          <div style={{ ...S.empAvatarLg, background: primCat.color+'44', color: primCat.color, fontSize:20 }}>
+            {activeEmployee?.avatar}
+          </div>
+          <div>
+            <div style={S.profileName}>{activeEmployee?.name}</div>
+            <div style={{ display:'flex', gap:4, flexWrap:'wrap', marginTop:4 }}>
+              {(activeEmployee?.categories||[]).map(c => {
+                const cat = CATEGORIES[c]
+                return cat ? <span key={c} style={{ ...S.catBadge, background:cat.color+'22', color:cat.color }}>{cat.icon} {cat.label}</span> : null
+              })}
+            </div>
+          </div>
+        </div>
+
+        {/* E-Mail */}
+        <div style={{ background:'#FFFDF8', border:'1px solid #E0DBD0', borderRadius:12, padding:'18px 16px', marginBottom:14, boxShadow:'0 2px 6px rgba(0,0,0,0.04)' }}>
+          <div style={{ fontSize:13, fontWeight:700, color:'#1a1a1a', marginBottom:14 }}>📧 E-Mail-Adresse</div>
+          <label style={S.label}>E-Mail (für Benachrichtigungen)</label>
+          <Input value={email} onChange={setEmail} type="email" placeholder="deine@email.de" />
+          <div style={{ fontSize:11, color:'#aaa', marginTop:6 }}>
+            Wird für Schicht-Benachrichtigungen genutzt.
+          </div>
+        </div>
+
+        {/* Passwort */}
+        <div style={{ background:'#FFFDF8', border:'1px solid #E0DBD0', borderRadius:12, padding:'18px 16px', marginBottom:20, boxShadow:'0 2px 6px rgba(0,0,0,0.04)' }}>
+          <div style={{ fontSize:13, fontWeight:700, color:'#1a1a1a', marginBottom:14 }}>🔐 Passwort ändern</div>
+          <label style={S.label}>Aktuelles Passwort</label>
+          <Input value={oldPw} onChange={setOldPw} type="password" placeholder="Aktuelles Passwort" />
+          <label style={S.label}>Neues Passwort</label>
+          <Input value={newPw} onChange={setNewPw} type="password" placeholder="Mindestens 4 Zeichen" />
+          <label style={S.label}>Neues Passwort wiederholen</label>
+          <Input value={newPw2} onChange={setNewPw2} type="password" placeholder="Passwort bestätigen" />
+          <div style={{ fontSize:11, color:'#aaa', marginTop:6 }}>
+            Leer lassen wenn du das Passwort nicht ändern möchtest.
+          </div>
+        </div>
+
+        {/* Feedback */}
+        {msg && (
+          <div style={{
+            padding:'10px 14px', borderRadius:8, marginBottom:14, fontSize:13, fontWeight:600,
+            background: msg.type==='ok' ? '#EDF7F0' : '#FFF0F0',
+            color:      msg.type==='ok' ? '#2A9D6E' : '#E07070',
+            border:     `1px solid ${msg.type==='ok' ? '#2A9D6E44' : '#F5C6C6'}`,
+          }}>
+            {msg.type==='ok' ? '✓ ' : '⚠️ '}{msg.text}
+          </div>
+        )}
+
+        <button style={{ ...S.confirmBtn, width:'100%', opacity: saving ? 0.7 : 1 }}
+          onClick={handleSave} disabled={saving}>
+          {saving ? 'Wird gespeichert…' : 'Speichern'}
+        </button>
+      </div>
+    )
+  }
+
   /* ═══════════ ASSIGN SHIFT MODAL (Chef weist Mitarbeiter zu) ═══════════ */
   const AssignShiftModal = () => {
     if (!assignShift) return null
@@ -833,6 +949,7 @@ export default function App() {
             <div style={S.tabBar}>
               <button style={mitTab==='liste'    ?S.tabActive:S.tab} onClick={()=>setMitTab('liste')}>📋 Liste</button>
               <button style={mitTab==='kalender' ?S.tabActive:S.tab} onClick={()=>setMitTab('kalender')}>📅 Kalender</button>
+              <button style={mitTab==='konto'    ?S.tabActive:S.tab} onClick={()=>setMitTab('konto')}>👤 Mein Konto</button>
             </div>
 
             {(() => {
@@ -877,6 +994,8 @@ export default function App() {
                     </>
                   )}
                   {mitTab==='kalender'&&<Calendar monday={calMit} setMonday={setCalMit} calIsChef={false} />}
+
+                  {mitTab==='konto' && <MeinKontoTab />}
                 </>
               )
             })()}
