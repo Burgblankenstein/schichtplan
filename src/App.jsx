@@ -896,8 +896,35 @@ export default function App() {
           <div style={S.modal} onClick={e=>e.stopPropagation()}>
             <div style={S.modalHandle}/>
             <h3 style={S.modalTitle}>🏢 Räume verwalten</h3>
+
+            {/* Feste Standard-Räume */}
+            <label style={S.label}>Standard-Räume hinzufügen</label>
+            <div style={{ display:'flex', gap:6, flexWrap:'wrap', marginBottom:14 }}>
+              {[
+                { name:'Außentheke', icon:'🍺' },
+                { name:'Garderobe',  icon:'🧥' },
+                { name:'Wertmarken', icon:'🎟️' },
+              ].map(preset => {
+                const exists = db.rooms.some(r => r.name === preset.name)
+                return (
+                  <button key={preset.name}
+                    style={{ ...S.catBtn, ...(exists ? { opacity:0.4, cursor:'default' } : { borderColor:'#C8960A', color:'#C8960A', background:'#FFF8EC' }) }}
+                    disabled={exists}
+                    onClick={async () => {
+                      if (exists) return
+                      await db.addRoom(preset.name, preset.icon)
+                      showToast(`${preset.name} hinzugefügt ✓`)
+                    }}>
+                    {preset.icon} {preset.name} {exists ? '✓' : '+'}
+                  </button>
+                )
+              })}
+            </div>
+
+            {/* Bestehende Räume */}
+            <label style={S.label}>Aktive Räume</label>
             <div style={{ marginBottom:14 }}>
-              {db.rooms.length===0&&<div style={{ fontSize:13,color:'#bbb',fontStyle:'italic' }}>Noch keine Räume.</div>}
+              {db.rooms.length===0 && <div style={{ fontSize:13,color:'#bbb',fontStyle:'italic' }}>Noch keine Räume.</div>}
               {db.rooms.map((room,i)=>(
                 <div key={room.id} style={{ display:'flex',alignItems:'center',gap:10,padding:'8px 10px',background:i%2===0?'#F5F3EE':'#FFFDF8',borderRadius:8,marginBottom:4 }}>
                   <span style={{ fontSize:18 }}>{room.icon}</span>
@@ -907,8 +934,10 @@ export default function App() {
                 </div>
               ))}
             </div>
+
+            {/* Individueller Raum */}
             <div style={{ borderTop:'1px solid #E0DBD0',paddingTop:12 }}>
-              <label style={S.label}>Neuer Raum</label>
+              <label style={S.label}>Individueller Raum</label>
               <div style={{ display:'flex',gap:8,marginBottom:8 }}>
                 <Input value={newRoomIcon} onChange={setNewRoomIcon} style={{ width:60,textAlign:'center',fontSize:20,padding:'8px 4px' }} />
                 <Input value={newRoomName} onChange={setNewRoomName} placeholder="z.B. Wintergarten" style={{ flex:1 }} />
