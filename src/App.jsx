@@ -837,7 +837,7 @@ export default function App() {
       </header>
 
       {/* STATS */}
-      <div style={S.statsBar}>
+      {isChef && <div style={S.statsBar}>
         {Object.entries(CATEGORIES).map(([key,val])=>(
           <div key={key} style={S.statCard}>
             <span style={{ fontSize:16 }}>{val.icon}</span>
@@ -848,7 +848,7 @@ export default function App() {
             <div style={S.statChip}>{db.shifts.filter(s=>s.category===key&&!s.assigned&&s.date>=today).length}</div>
           </div>
         ))}
-      </div>
+      </div>}
 
       <div style={S.main}>
 
