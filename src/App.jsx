@@ -327,6 +327,7 @@ export default function App() {
         <div style={S.shiftCardTop}>
           <div style={S.shiftMeta}>
             <span style={{ ...S.catBadge, background:cat.color+'22', color:cat.color }}>{cat.icon} {cat.label}</span>
+            <span style={S.shiftDateSm}>{fmtShort(live.date)}</span>
           </div>
           {cardIsChef && (
             <div style={{ display:'flex', gap:4 }}>
