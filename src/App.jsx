@@ -1,6 +1,7 @@
 import { useState, useCallback, useMemo } from 'react'
 import LoginScreen from './LoginScreen'
 import useData from './useData'
+import { supabase } from './supabase'
 import { S } from './styles'
 import { CATEGORIES, CHEF_ID, WD, SHIFT_TEMPLATES, getMonday, addDays, toDS, fmtLong, fmtShort, fmtTime, mkInitials } from './constants'
 
@@ -156,9 +157,8 @@ export default function App() {
           if (newPw.length < 4) { setMsg({ type:'err', text:'Passwort muss mindestens 4 Zeichen haben.' }); return }
 
           // Altes Passwort prüfen
-          const { data: rows } = await import('./supabase').then(m =>
-            m.supabase.from('accounts').select('password').eq('id', currentAccount.id)
-          )
+          const { data: rows } = await supabase
+            .from('accounts').select('password').eq('id', currentAccount.id)
           const stored = rows?.[0]?.password || ''
           const oldHashed = 'sha256:' + await sha256(oldPw)
           const oldValid  = stored.startsWith('sha256:') ? stored === oldHashed : stored === oldPw
