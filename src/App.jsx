@@ -174,6 +174,7 @@ export default function App() {
         setCurrentAccount(acc => ({ ...acc, email }))
         setOldPw(''); setNewPw(''); setNewPw2('')
         setMsg({ type:'ok', text:'Gespeichert ✓' })
+        if (newPw) showToast('Passwort erfolgreich geändert ✓')
       } catch(e) {
         setMsg({ type:'err', text: e.message })
       } finally {
