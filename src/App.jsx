@@ -421,6 +421,10 @@ export default function App() {
               <div style={{ ...S.assignedBadge, padding:'8px', textAlign:'center', borderRadius:8 }}>✓ Besetzt</div>
             ) : hasApplied ? (
               <button style={S.withdrawBtn} onClick={async () => { await db.withdrawApplication(live.id,live,activeEmployee.id); showToast('Bewerbung zurückgezogen') }}>Bewerbung zurückziehen</button>
+            ) : db.shifts.some(s => s.date === live.date && s.assigned === activeEmployee?.id) ? (
+              <div style={{ fontSize:12, color:'#aaa', background:'#F5F3EE', borderRadius:8, padding:'8px', textAlign:'center', border:'1px solid #E0DBD0' }}>
+                ℹ️ Du bist an diesem Tag bereits eingeteilt
+              </div>
             ) : (
               <button style={{ ...S.applyBtn, background:cat.color }} onClick={async () => { await db.applyForShift(live.id,live,activeEmployee); showToast('Bewerbung eingereicht ✓') }}>Bewerben</button>
             )}
