@@ -274,7 +274,7 @@ export default function App() {
           <label style={S.label}>Hinweis an den Chef (optional)</label>
           <textarea
             style={{ ...S.input, height:80, resize:'none', lineHeight:1.5 }}
-            placeholder="z.B. „Kann erst ab 17:30 Uhr" oder „Muss früher gehen""
+            placeholder="z.B. Kann erst ab 17:30 Uhr oder Muss frueher gehen"
             value={note}
             onChange={e => setNote(e.target.value)}
           />
