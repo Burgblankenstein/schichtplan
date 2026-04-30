@@ -45,7 +45,7 @@ export default function App() {
 
   const [chefTab,    setChefTab]    = useState('liste')
   const [chefSubTab, setChefSubTab] = useState('schichten')
-  const [mitTab,     setMitTab]     = useState('liste')
+  const [mitTab,     setMitTab]     = useState('schichtplan')
   const [showNotifs, setShowNotifs] = useState(false)
   const [calDayDetail, setCalDayDetail] = useState(null)
   const [editingRoomSid, setEditingRoomSid] = useState(null)
@@ -61,6 +61,7 @@ export default function App() {
   const [editAccount,     setEditAccount]     = useState(null)
   const [editShift,       setEditShift]       = useState(null)
   const [assignShift,     setAssignShift]     = useState(null) // shift being assigned by chef
+  const [applyModal,      setApplyModal]      = useState(null) // { shift } — employee apply with note
 
   const [bulkForm, setBulkForm] = useState({
     date:'', template:'ala_carte', customLabel:'', time:'17:00 – 23:00', room:'',
@@ -246,6 +247,54 @@ export default function App() {
     )
   }
 
+  /* ═══════════ APPLY MODAL (Bewerbung mit Hinweis) ═══════════ */
+  const ApplyModal = () => {
+    if (!applyModal) return null
+    const shift = db.shifts.find(s => s.id === applyModal.shift.id) || applyModal.shift
+    const cat   = CATEGORIES[shift.category]
+    const room  = getRoom(shift.room)
+    const [note, setNote] = useState('')
+
+    return (
+      <div style={S.overlay} onClick={() => setApplyModal(null)}>
+        <div style={S.modal} onClick={e => e.stopPropagation()}>
+          <div style={S.modalHandle}/>
+          <h3 style={S.modalTitle}>Auf Schicht bewerben</h3>
+
+          {/* Schicht-Infos */}
+          <div style={{ background:'#F5F3EE', borderRadius:10, padding:'12px 14px', marginBottom:16 }}>
+            <div style={{ ...S.catBadge, background:cat.color+'22', color:cat.color, display:'inline-block', marginBottom:6 }}>{cat.icon} {cat.label}</div>
+            <div style={{ fontSize:16, fontWeight:700, color:'#1a1a1a', marginBottom:2 }}>{shift.label}</div>
+            <div style={{ fontSize:13, color:'#888' }}>📅 {fmtLong(shift.date)}</div>
+            <div style={{ fontSize:13, color:'#888' }}>🕐 {shift.time}</div>
+            {room && <div style={{ fontSize:13, color:'#6B8FB5', marginTop:2 }}>🏢 {room.icon} {room.name}</div>}
+          </div>
+
+          {/* Hinweis-Feld */}
+          <label style={S.label}>Hinweis an den Chef (optional)</label>
+          <textarea
+            style={{ ...S.input, height:80, resize:'none', lineHeight:1.5 }}
+            placeholder="z.B. „Kann erst ab 17:30 Uhr" oder „Muss früher gehen""
+            value={note}
+            onChange={e => setNote(e.target.value)}
+          />
+          <div style={{ fontSize:11, color:'#bbb', marginTop:4 }}>
+            Dein Hinweis erscheint in der Benachrichtigung des Chefs.
+          </div>
+
+          <div style={S.modalActions}>
+            <button style={S.cancelBtn} onClick={() => setApplyModal(null)}>Abbrechen</button>
+            <button style={{ ...S.confirmBtn, background: cat.color }} onClick={async () => {
+              await db.applyForShift(shift.id, shift, activeEmployee, note)
+              setApplyModal(null)
+              showToast('Bewerbung eingereicht ✓')
+            }}>Bewerben</button>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
   /* ═══════════ ASSIGN SHIFT MODAL (Chef weist Mitarbeiter zu) ═══════════ */
   const AssignShiftModal = () => {
     if (!assignShift) return null
@@ -426,7 +475,7 @@ export default function App() {
                 ℹ️ Du bist an diesem Tag bereits eingeteilt
               </div>
             ) : (
-              <button style={{ ...S.applyBtn, background:cat.color }} onClick={async () => { await db.applyForShift(live.id,live,activeEmployee); showToast('Bewerbung eingereicht ✓') }}>Bewerben</button>
+              <button style={{ ...S.applyBtn, background:cat.color }} onClick={() => setApplyModal({ shift: live })}>Bewerben</button>
             )}
           </>
         )}
@@ -862,8 +911,16 @@ export default function App() {
         {isChef && (
           <div style={S.content}>
             <div style={S.tabBar}>
-              <button style={chefSubTab==='schichten'?S.tabActive:S.tab} onClick={()=>setChefSubTab('schichten')}>📋 Schichten</button>
-              <button style={chefSubTab==='accounts' ?S.tabActive:S.tab} onClick={()=>setChefSubTab('accounts')}>🔑 Accounts</button>
+              <button style={chefSubTab==='schichten'   ?S.tabActive:S.tab} onClick={()=>setChefSubTab('schichten')}>📋 Schichten</button>
+              <button style={chefSubTab==='bewerbungen' ?S.tabActive:S.tab} onClick={()=>setChefSubTab('bewerbungen')}>
+                📬 Bewerbungen
+                {db.shifts.filter(s=>s.applicants.length>0&&!s.assigned).length>0&&(
+                  <span style={{ ...S.bellBadge, position:'relative', top:-1, right:'auto', marginLeft:6, fontSize:10 }}>
+                    {db.shifts.filter(s=>s.applicants.length>0&&!s.assigned).length}
+                  </span>
+                )}
+              </button>
+              <button style={chefSubTab==='accounts'    ?S.tabActive:S.tab} onClick={()=>setChefSubTab('accounts')}>🔑 Accounts</button>
             </div>
 
             {chefSubTab==='schichten' && (
@@ -946,6 +1003,27 @@ export default function App() {
               </>
             )}
             {chefSubTab==='accounts'&&<AccountsTab/>}
+
+            {/* ── Offene Bewerbungen ── */}
+            {chefSubTab==='bewerbungen' && (() => {
+              const withApplicants = db.shifts
+                .filter(s => s.applicants.length > 0 && !s.assigned && s.date >= today)
+                .sort((a,b) => a.date.localeCompare(b.date))
+              return (
+                <div>
+                  <h2 style={S.sectionTitle}>📬 Offene Bewerbungen</h2>
+                  {withApplicants.length === 0 && (
+                    <div style={{ ...S.empty, textAlign:'center', padding:32 }}>
+                      <div style={{ fontSize:32, marginBottom:8 }}>✅</div>
+                      <div style={{ fontSize:15, fontWeight:600, color:'#aaa' }}>Keine offenen Bewerbungen</div>
+                    </div>
+                  )}
+                  <div style={S.shiftGrid}>
+                    {withApplicants.map(s => <ShiftCard key={s.id} shift={s} cardIsChef />)}
+                  </div>
+                </div>
+              )
+            })()}
           </div>
         )}
 
@@ -953,19 +1031,22 @@ export default function App() {
         {!isChef && activeEmployee && (
           <div style={S.content}>
             <div style={S.tabBar}>
-              <button style={mitTab==='liste'    ?S.tabActive:S.tab} onClick={()=>setMitTab('liste')}>📋 Liste</button>
-              <button style={mitTab==='kalender' ?S.tabActive:S.tab} onClick={()=>setMitTab('kalender')}>📅 Kalender</button>
-              <button style={mitTab==='konto'    ?S.tabActive:S.tab} onClick={()=>setMitTab('konto')}>👤 Mein Konto</button>
+              <button style={mitTab==='schichtplan' ?S.tabActive:S.tab} onClick={()=>setMitTab('schichtplan')}>📅 Mein Schichtplan</button>
+              <button style={mitTab==='offen'       ?S.tabActive:S.tab} onClick={()=>setMitTab('offen')}>📋 Offene Schichten</button>
+              <button style={mitTab==='kalender'    ?S.tabActive:S.tab} onClick={()=>setMitTab('kalender')}>🗓️ Kalender</button>
+              <button style={mitTab==='konto'       ?S.tabActive:S.tab} onClick={()=>setMitTab('konto')}>👤 Mein Konto</button>
             </div>
 
             {(() => {
               const available = db.shifts.filter(s => empCategories.includes(s.category) && s.date >= today)
               const applied   = available.filter(s => s.applicants.includes(activeEmployee.id))
-              const assigned  = db.shifts.filter(s => s.assigned === activeEmployee.id)
+              const assigned  = db.shifts.filter(s => s.assigned === activeEmployee.id && s.date >= today)
+                .sort((a,b) => a.date.localeCompare(b.date))
               const primCat   = CATEGORIES[empCategories[0]] || CATEGORIES.service
 
               return (
                 <>
+                  {/* Profile banner */}
                   <div style={S.profileBanner}>
                     <div style={{ ...S.empAvatarLg, background:primCat.color+'44', color:primCat.color, fontSize:20 }}>{activeEmployee.avatar}</div>
                     <div>
@@ -984,23 +1065,90 @@ export default function App() {
                     </div>
                   </div>
 
-                  {mitTab==='liste' && (
+                  {/* ── Mein Schichtplan ── */}
+                  {mitTab==='schichtplan' && (
                     <>
-                      {assigned.length>0&&(
-                        <>
-                          <h3 style={S.subTitle}>✅ Meine Schichten</h3>
-                          <div style={S.shiftGrid}>{assigned.map(s=><ShiftCard key={s.id} shift={s} isEmployee />)}</div>
-                        </>
+                      {assigned.length === 0 && (
+                        <div style={{ ...S.empty, textAlign:'center', padding:32 }}>
+                          <div style={{ fontSize:32, marginBottom:8 }}>📭</div>
+                          <div style={{ fontSize:15, fontWeight:600, color:'#aaa' }}>Noch keine Schichten eingeteilt</div>
+                          <div style={{ fontSize:12, color:'#bbb', marginTop:4 }}>Schau unter „Offene Schichten" um dich zu bewerben.</div>
+                        </div>
                       )}
-                      <h3 style={S.subTitle}>📋 Offene Schichten</h3>
-                      <div style={S.shiftGrid}>
-                        {available.filter(s=>!s.assigned).length===0 && <div style={S.empty}>Keine offenen Schichten.</div>}
-                        {available.filter(s=>!s.assigned).map(s=><ShiftCard key={s.id} shift={s} isEmployee />)}
-                      </div>
+                      {(() => {
+                        // Group assigned shifts by date
+                        const groups = {}
+                        assigned.forEach(s => { if (!groups[s.date]) groups[s.date] = []; groups[s.date].push(s) })
+                        return Object.entries(groups).map(([date, shifts]) => (
+                          <div key={date} style={S.dayGroup}>
+                            <div style={S.dayGroupHeader}>
+                              <span style={S.dayGroupDate}>{fmtLong(date)}</span>
+                              <span style={S.dayGroupCount}>{shifts.length} Schicht{shifts.length>1?'en':''}</span>
+                            </div>
+                            <div style={S.shiftGrid}>
+                              {shifts.map(s => <ShiftCard key={s.id} shift={s} isEmployee />)}
+                            </div>
+                          </div>
+                        ))
+                      })()}
                     </>
                   )}
-                  {mitTab==='kalender'&&<Calendar monday={calMit} setMonday={setCalMit} calIsChef={false} />}
 
+                  {/* ── Offene Schichten ── */}
+                  {mitTab==='offen' && (() => {
+                    // Group open shifts by date, show assigned-today blocker
+                    const open = available.filter(s => !s.assigned)
+                    const groups = {}
+                    open.forEach(s => { if (!groups[s.date]) groups[s.date] = []; groups[s.date].push(s) })
+                    const sortedDates = Object.entries(groups).sort(([a],[b]) => a.localeCompare(b))
+
+                    if (sortedDates.length === 0) return (
+                      <div style={{ ...S.empty, textAlign:'center', padding:32 }}>
+                        <div style={{ fontSize:32, marginBottom:8 }}>✅</div>
+                        <div style={{ fontSize:15, fontWeight:600, color:'#aaa' }}>Keine offenen Schichten</div>
+                      </div>
+                    )
+
+                    return sortedDates.map(([date, shifts]) => {
+                      const isAssignedThisDay = db.shifts.some(s => s.date === date && s.assigned === activeEmployee.id)
+                      const [showAll, setShowAll] = useState(false)
+                      const visibleShifts = isAssignedThisDay && !showAll ? [] : shifts
+
+                      return (
+                        <div key={date} style={S.dayGroup}>
+                          <div style={S.dayGroupHeader}>
+                            <span style={S.dayGroupDate}>{fmtLong(date)}</span>
+                            <span style={S.dayGroupCount}>{shifts.length} Schicht{shifts.length>1?'en':''}</span>
+                            {isAssignedThisDay && <span style={S.dayGroupUnavail}>✓ Bereits eingeteilt</span>}
+                          </div>
+
+                          {isAssignedThisDay && !showAll ? (
+                            <div style={{ padding:'12px 14px', background:'#EDF7F0', borderRadius:10, border:'1px solid #2A9D6E33', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+                              <span style={{ fontSize:13, color:'#2A9D6E', fontWeight:600 }}>✓ Du bist an diesem Tag bereits eingeteilt</span>
+                              <button style={{ ...S.filterBtn, fontSize:11, color:'#888' }} onClick={() => setShowAll(true)}>
+                                Alle Schichten ansehen
+                              </button>
+                            </div>
+                          ) : (
+                            <>
+                              {isAssignedThisDay && (
+                                <div style={{ marginBottom:8, display:'flex', justifyContent:'flex-end' }}>
+                                  <button style={{ ...S.filterBtn, fontSize:11, color:'#aaa' }} onClick={() => setShowAll(false)}>
+                                    Ausblenden
+                                  </button>
+                                </div>
+                              )}
+                              <div style={S.shiftGrid}>
+                                {visibleShifts.map(s => <ShiftCard key={s.id} shift={s} isEmployee />)}
+                              </div>
+                            </>
+                          )}
+                        </div>
+                      )
+                    })
+                  })()}
+
+                  {mitTab==='kalender'&&<Calendar monday={calMit} setMonday={setCalMit} calIsChef={false} />}
                   {mitTab==='konto' && <MeinKontoTab />}
                 </>
               )
@@ -1014,6 +1162,7 @@ export default function App() {
       {editShift      && <EditShiftModal/>}
       {editAccount    && <EditAccountModal/>}
       {assignShift    && <AssignShiftModal/>}
+      {applyModal     && <ApplyModal/>}
 
       {/* Räume Modal */}
       {showManageRooms && (

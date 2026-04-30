@@ -195,13 +195,14 @@ export default function useData() {
     )
   }
 
-  const applyForShift = async (shiftId, shift, employee) => {
+  const applyForShift = async (shiftId, shift, employee, note = '') => {
     if (shift.applicants.includes(employee.id)) return
     await supabase.from('shifts').update({ applicants: [...shift.applicants, employee.id] }).eq('id', shiftId)
     const cat  = CATEGORIES[shift.category]
     const room = rooms.find(r => r.id === shift.room)
+    const noteText = note?.trim() ? ` — Hinweis: „${note.trim()}"` : ''
     await pushNotif(CHEF_ID, 'application',
-      `${employee.name} hat sich auf „${shift.label}" am ${fmtShort(shift.date)} beworben`, shiftId,
+      `${employee.name} hat sich auf „${shift.label}" am ${fmtShort(shift.date)} beworben${noteText}`, shiftId,
       { employeeName: employee.name, shiftLabel: shift.label, shiftDate: fmtShort(shift.date), shiftTime: shift.time, shiftIcon: cat.icon, category: cat.label, room: room?.name || '' }
     )
   }
