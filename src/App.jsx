@@ -62,6 +62,7 @@ export default function App() {
   const [editShift,       setEditShift]       = useState(null)
   const [assignShift,     setAssignShift]     = useState(null) // shift being assigned by chef
   const [applyModal,      setApplyModal]      = useState(null) // { shift } — employee apply with note
+  const [showAllDates,    setShowAllDates]    = useState({}) // { [date]: bool } for open shifts per day
 
   const [bulkForm, setBulkForm] = useState({
     date:'', template:'ala_carte', customLabel:'', time:'17:00 – 23:00', room:'',
@@ -1111,8 +1112,8 @@ export default function App() {
 
                     return sortedDates.map(([date, shifts]) => {
                       const isAssignedThisDay = db.shifts.some(s => s.date === date && s.assigned === activeEmployee.id)
-                      const [showAll, setShowAll] = useState(false)
-                      const visibleShifts = isAssignedThisDay && !showAll ? [] : shifts
+                      const showAll = showAllDates[date] || false
+                      const toggleShowAll = (val) => setShowAllDates(prev => ({ ...prev, [date]: val }))
 
                       return (
                         <div key={date} style={S.dayGroup}>
@@ -1125,7 +1126,7 @@ export default function App() {
                           {isAssignedThisDay && !showAll ? (
                             <div style={{ padding:'12px 14px', background:'#EDF7F0', borderRadius:10, border:'1px solid #2A9D6E33', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
                               <span style={{ fontSize:13, color:'#2A9D6E', fontWeight:600 }}>✓ Du bist an diesem Tag bereits eingeteilt</span>
-                              <button style={{ ...S.filterBtn, fontSize:11, color:'#888' }} onClick={() => setShowAll(true)}>
+                              <button style={{ ...S.filterBtn, fontSize:11, color:'#888' }} onClick={() => toggleShowAll(true)}>
                                 Alle Schichten ansehen
                               </button>
                             </div>
@@ -1133,13 +1134,13 @@ export default function App() {
                             <>
                               {isAssignedThisDay && (
                                 <div style={{ marginBottom:8, display:'flex', justifyContent:'flex-end' }}>
-                                  <button style={{ ...S.filterBtn, fontSize:11, color:'#aaa' }} onClick={() => setShowAll(false)}>
+                                  <button style={{ ...S.filterBtn, fontSize:11, color:'#aaa' }} onClick={() => toggleShowAll(false)}>
                                     Ausblenden
                                   </button>
                                 </div>
                               )}
                               <div style={S.shiftGrid}>
-                                {visibleShifts.map(s => <ShiftCard key={s.id} shift={s} isEmployee />)}
+                                {shifts.map(s => <ShiftCard key={s.id} shift={s} isEmployee />)}
                               </div>
                             </>
                           )}
