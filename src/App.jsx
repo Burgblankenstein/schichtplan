@@ -123,20 +123,102 @@ export default function App() {
   /* ── PDF Export ── */
   const exportPDF = () => {
     const week = Array.from({ length:7 }, (_,i) => addDays(calChef,i))
-    const rows = week.map(day => {
+    const weekLabel = `${week[0].toLocaleDateString('de-DE',{day:'2-digit',month:'long'})} – ${week[6].toLocaleDateString('de-DE',{day:'2-digit',month:'long',year:'numeric'})}`
+
+    // Build rich HTML grouped by date → room → time
+    const dayBlocks = week.map(day => {
       const ds = toDS(day)
       const dayShifts = db.shifts.filter(s => s.date === ds)
-      return `<tr><td style="padding:8px;border:1px solid #ddd;font-weight:bold">${day.toLocaleDateString('de-DE',{weekday:'short',day:'2-digit',month:'2-digit'})}</td>
-        <td style="padding:8px;border:1px solid #ddd">${dayShifts.map(s => {
+      if (dayShifts.length === 0) return ''
+
+      const byRoom = {}
+      dayShifts.forEach(s => {
+        const key = s.room || '__no_room__'
+        if (!byRoom[key]) byRoom[key] = []
+        byRoom[key].push(s)
+      })
+      Object.values(byRoom).forEach(arr => arr.sort((a,b) => a.time.localeCompare(b.time)))
+      const roomGroups = Object.entries(byRoom).sort(([a],[b]) => {
+        if (a === '__no_room__') return 1
+        if (b === '__no_room__') return -1
+        const nameA = db.rooms.find(r => r.id === a)?.name || a
+        const nameB = db.rooms.find(r => r.id === b)?.name || b
+        return nameA.localeCompare(nameB)
+      })
+
+      const roomHtml = roomGroups.map(([roomKey, shifts]) => {
+        const room = roomKey === '__no_room__' ? null : getRoom(roomKey)
+        const heading = roomKey === '__no_room__' ? '' : db.getRoomHeading(ds, roomKey)
+        const roomTitle = room ? `${room.icon} ${room.name}` : '— kein Raum'
+        const headingHtml = heading ? `<div class="room-heading">🎯 ${heading}</div>` : ''
+        const rowsHtml = shifts.map(s => {
           const cat = CATEGORIES[s.category]
           const emp = s.assigned ? getEmp(s.assigned)?.name : '—'
-          return `${cat.icon} ${s.label} (${s.time}) · ${cat.label}${emp !== '—' ? ` · ${emp}` : ''}`
-        }).join('<br>') || '—'}</td></tr>`
+          return `<tr>
+            <td class="time">${s.time}</td>
+            <td class="label">${s.label}</td>
+            <td class="cat" style="color:${cat.color}">${cat.icon} ${cat.label}</td>
+            <td class="emp">${emp !== '—' ? `✓ ${emp}` : '<span class="open">offen</span>'}</td>
+          </tr>`
+        }).join('')
+        return `<div class="room-block">
+          <div class="room-title">${roomTitle}</div>
+          ${headingHtml}
+          <table><tbody>${rowsHtml}</tbody></table>
+        </div>`
+      }).join('')
+
+      return `<div class="day-block">
+        <div class="day-header">${day.toLocaleDateString('de-DE',{weekday:'long',day:'2-digit',month:'long'})}</div>
+        ${roomHtml}
+      </div>`
     }).join('')
-    const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Schichtplan</title><style>body{font-family:Georgia,serif;padding:20px}h1{color:#C8960A}table{width:100%;border-collapse:collapse}td{vertical-align:top}</style></head><body><h1>🍴 SchichtPlan</h1><table>${rows}</table></body></html>`
-    const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(new Blob([html],{type:'text/html'})), download:'schichtplan.html' })
-    a.click()
-    showToast('Wochenplan exportiert ✓')
+
+    const html = `<!DOCTYPE html>
+<html lang="de"><head>
+<meta charset="utf-8">
+<title>Schichtplan – ${weekLabel}</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: Georgia, serif; color: #1a1a1a; background: #fff; padding: 24px; }
+  .header { display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 24px; border-bottom: 2px solid #C8960A; padding-bottom: 12px; }
+  .logo { font-size: 22px; font-weight: 700; letter-spacing: 3px; }
+  .logo span { color: #C8960A; }
+  .week { font-size: 13px; color: #888; }
+  .day-block { margin-bottom: 20px; page-break-inside: avoid; }
+  .day-header { font-size: 16px; font-weight: 700; background: #F5F3EE; padding: 8px 12px; border-radius: 6px; margin-bottom: 8px; border-left: 4px solid #C8960A; }
+  .room-block { margin-bottom: 10px; margin-left: 12px; }
+  .room-title { font-size: 12px; font-weight: 700; color: #6B8FB5; margin-bottom: 3px; }
+  .room-heading { font-size: 11px; color: #7B5EA7; background: #EDE8FF; padding: 2px 8px; border-radius: 6px; display: inline-block; margin-bottom: 4px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  td { padding: 5px 8px; border-bottom: 1px solid #EDE8DF; vertical-align: middle; }
+  .time { width: 140px; color: #888; font-size: 12px; }
+  .label { font-weight: 600; }
+  .cat { width: 110px; font-size: 12px; }
+  .emp { width: 150px; }
+  .open { color: #C8960A; font-style: italic; }
+  .footer { margin-top: 24px; font-size: 10px; color: #bbb; text-align: center; border-top: 1px solid #eee; padding-top: 8px; }
+  @media print {
+    body { padding: 12px; }
+    .day-block { page-break-inside: avoid; }
+  }
+</style>
+</head><body>
+<div class="header">
+  <div class="logo">🍴 SCHICHT<span>PLAN</span></div>
+  <div class="week">${weekLabel}</div>
+</div>
+${dayBlocks || '<p style="color:#aaa;text-align:center;padding:40px">Keine Schichten in dieser Woche</p>'}
+<div class="footer">Erstellt mit SchichtPlan · ${new Date().toLocaleDateString('de-DE',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'})}</div>
+</body></html>`
+
+    // Open in new tab and trigger print dialog → Save as PDF
+    const win = window.open('', '_blank')
+    win.document.write(html)
+    win.document.close()
+    win.focus()
+    setTimeout(() => { win.print() }, 500)
+    showToast('PDF-Druckdialog wird geöffnet ✓')
   }
 
   /* ═══════════ MEIN KONTO TAB (Mitarbeiter) ═══════════ */
@@ -558,7 +640,7 @@ export default function App() {
         </div>
         {calIsChef && (
           <div style={{ textAlign:'right', marginBottom:10 }}>
-            <button style={{ ...S.addBtn, background:'#888', fontSize:12, padding:'6px 14px' }} onClick={exportPDF}>📄 Exportieren</button>
+            <button style={{ ...S.addBtn, background:'#888', fontSize:12, padding:'6px 14px' }} onClick={exportPDF}>📄 Als PDF exportieren</button>
           </div>
         )}
         {!calIsChef && (
