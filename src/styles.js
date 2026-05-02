@@ -50,8 +50,13 @@ export const S = {
   actionBtns:    { display:'flex', gap:8, flexWrap:'wrap' },
   addBtn:        { padding:'8px 16px', background:'#C8960A', border:'none', color:'#fff', borderRadius:8, cursor:'pointer', fontSize:13, fontWeight:700, fontFamily:'inherit', whiteSpace:'nowrap' },
 
-  // Grouped shifts by date
-  dayGroup:       { marginBottom:20 },
+  // Grouped shifts: room groups within a day
+  roomGroup:        { marginBottom:16, background:'#FAFAF8', border:'1px solid #EDE8DF', borderRadius:12, padding:'12px 14px' },
+  roomGroupHeader:  { marginBottom:10 },
+  roomGroupTitle:   { display:'flex', alignItems:'center', gap:8, marginBottom:4 },
+  roomGroupCount:   { fontSize:11, color:'#aaa', background:'#EDE8DF', padding:'2px 8px', borderRadius:10 },
+  roomHeadingBadge: { display:'inline-flex', alignItems:'center', gap:4, fontSize:12, fontWeight:700, color:'#7B5EA7', background:'#EDE8FF', padding:'3px 10px', borderRadius:10, border:'1px solid #C9B8F0', marginTop:2 },
+  roomHeadingBtn:   { padding:'3px 10px', background:'transparent', border:'1px dashed #D5CFC4', borderRadius:8, cursor:'pointer', fontSize:11, color:'#aaa', fontFamily:'inherit' },
   dayGroupHeader: { display:'flex', alignItems:'center', gap:10, marginBottom:10, paddingBottom:6, borderBottom:'2px solid #E0DBD0' },
   dayGroupDate:   { fontSize:15, fontWeight:700, color:'#1a1a1a' },
   dayGroupCount:  { fontSize:11, color:'#aaa', background:'#EDE8DF', padding:'2px 8px', borderRadius:10 },

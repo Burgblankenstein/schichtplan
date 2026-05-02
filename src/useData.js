@@ -9,6 +9,7 @@ const mapRoom     = r => ({ id: r.id, name: r.name, icon: r.icon })
 const mapAccount  = r => ({ id: r.id, name: r.name, role: r.role, employeeId: r.employee_id, email: r.email || '' })
 const mapNotif    = r => ({ id: r.id, recipientId: r.recipient_id, type: r.type, text: r.text, shiftId: r.shift_id, read: r.read, ts: r.ts })
 const mapUnavail  = r => ({ id: r.id, employeeId: r.employee_id, date: r.date, note: r.note || '' })
+const mapHeading  = r => ({ id: r.id, date: r.date, roomId: r.room_id, heading: r.heading })
 
 export default function useData() {
   const [shifts,        setShifts]        = useState([])
@@ -17,19 +18,21 @@ export default function useData() {
   const [accounts,      setAccounts]      = useState([])
   const [notifications, setNotifications] = useState([])
   const [unavailable,   setUnavailable]   = useState([])
+  const [roomHeadings,  setRoomHeadings]  = useState([])
   const [loading,       setLoading]       = useState(true)
   const [error,         setError]         = useState(null)
 
   useEffect(() => {
     async function load() {
       try {
-        const [sh, em, rm, ac, no, un] = await Promise.all([
+        const [sh, em, rm, ac, no, un, rh] = await Promise.all([
           supabase.from('shifts').select('*').order('date'),
           supabase.from('employees').select('*').order('name'),
           supabase.from('rooms').select('*'),
           supabase.from('accounts').select('id,name,role,employee_id,email').order('role'),
           supabase.from('notifications').select('*').order('ts', { ascending: false }),
           supabase.from('unavailable_days').select('*'),
+          supabase.from('room_headings').select('*'),
         ])
         if (sh.error) throw sh.error
         setShifts(sh.data.map(mapShift))
@@ -38,6 +41,7 @@ export default function useData() {
         setAccounts(ac.data.map(mapAccount))
         setNotifications(no.data.map(mapNotif))
         setUnavailable((un.data || []).map(mapUnavail))
+        setRoomHeadings((rh.data || []).map(mapHeading))
       } catch (e) { setError(e.message) }
       finally { setLoading(false) }
     }
@@ -63,6 +67,8 @@ export default function useData() {
         reload('rooms', setRooms, mapRoom)).subscribe(),
       supabase.channel('unavail-ch').on('postgres_changes', { event:'*', schema:'public', table:'unavailable_days' }, () =>
         reload('unavailable_days', setUnavailable, mapUnavail)).subscribe(),
+      supabase.channel('heading-ch').on('postgres_changes', { event:'*', schema:'public', table:'room_headings' }, () =>
+        reload('room_headings', setRoomHeadings, mapHeading)).subscribe(),
     ]
     return () => channels.forEach(c => supabase.removeChannel(c))
   }, [])
@@ -285,13 +291,28 @@ export default function useData() {
     await supabase.from('accounts').delete().eq('id', acc.id)
   }
 
+  /* ── ROOM HEADINGS ── */
+  const setRoomHeading = async (date, roomId, heading) => {
+    const id = `${date}_${roomId}`
+    if (!heading.trim()) {
+      await supabase.from('room_headings').delete().eq('id', id)
+    } else {
+      await supabase.from('room_headings').upsert({ id, date, room_id: roomId, heading: heading.trim() })
+    }
+  }
+
+  const getRoomHeading = (date, roomId) => {
+    return roomHeadings.find(h => h.date === date && h.roomId === roomId)?.heading || ''
+  }
+
   return {
-    shifts, employees, rooms, accounts, notifications, unavailable, loading, error,
+    shifts, employees, rooms, accounts, notifications, unavailable, roomHeadings, loading, error,
     login, markAllRead, clearNotif,
     addShift, addShiftsBulk, updateShift,
     deleteShift, assignEmployee, unassignEmployee, declineShift, changeRoom,
     applyForShift, withdrawApplication,
     addUnavailableDay, removeUnavailableDay,
+    setRoomHeading, getRoomHeading,
     addRoom, deleteRoom,
     addAccount, updateAccount, deleteAccount,
   }

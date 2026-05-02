@@ -63,6 +63,7 @@ export default function App() {
   const [assignShift,     setAssignShift]     = useState(null) // shift being assigned by chef
   const [applyModal,      setApplyModal]      = useState(null) // { shift } — employee apply with note
   const [showAllDates,    setShowAllDates]    = useState({}) // { [date]: bool } for open shifts per day
+  const [selectedDayOverview, setSelectedDayOverview] = useState(null) // date string for employee day view
 
   const [bulkForm, setBulkForm] = useState({
     date:'', template:'ala_carte', customLabel:'', time:'17:00 – 23:00', room:'',
@@ -86,28 +87,34 @@ export default function App() {
 
   const today = toDS(new Date())
 
-  // Filtered + grouped shifts for chef list view
+  // Grouped: date -> room -> shifts sorted by time
   const groupedShifts = useMemo(() => {
-    let list = db.shifts.filter(s =>
+    const list = db.shifts.filter(s =>
       (filterCat  === 'all' || s.category === filterCat) &&
       (filterRoom === 'all' || s.room     === filterRoom) &&
       (!showOnlyFuture || s.date >= today)
     )
-    const groups = {}
-    list.forEach(s => {
-      if (!groups[s.date]) groups[s.date] = []
-      groups[s.date].push(s)
-    })
-    // Sort shifts within each day by room name then by time
-    Object.values(groups).forEach(shifts => {
-      shifts.sort((a, b) => {
-        const roomA = db.rooms.find(r => r.id === a.room)?.name || '~' // no room goes last
-        const roomB = db.rooms.find(r => r.id === b.room)?.name || '~'
-        if (roomA !== roomB) return roomA.localeCompare(roomB)
-        return a.time.localeCompare(b.time)
+    const byDate = {}
+    list.forEach(s => { if (!byDate[s.date]) byDate[s.date] = []; byDate[s.date].push(s) })
+    return Object.entries(byDate)
+      .sort(([a],[b]) => a.localeCompare(b))
+      .map(([date, shifts]) => {
+        const byRoom = {}
+        shifts.forEach(s => {
+          const key = s.room || '__no_room__'
+          if (!byRoom[key]) byRoom[key] = []
+          byRoom[key].push(s)
+        })
+        Object.values(byRoom).forEach(arr => arr.sort((a,b) => a.time.localeCompare(b.time)))
+        const roomGroups = Object.entries(byRoom).sort(([a],[b]) => {
+          if (a === '__no_room__') return 1
+          if (b === '__no_room__') return -1
+          const nameA = db.rooms.find(r => r.id === a)?.name || a
+          const nameB = db.rooms.find(r => r.id === b)?.name || b
+          return nameA.localeCompare(nameB)
+        })
+        return { date, roomGroups, total: shifts.length }
       })
-    })
-    return Object.entries(groups).sort(([a],[b]) => a.localeCompare(b))
   }, [db.shifts, db.rooms, filterCat, filterRoom, showOnlyFuture, today])
 
   // Employee's categories
@@ -358,6 +365,45 @@ export default function App() {
   if (db.loading) return <div style={S.spinner}><div style={S.spinnerIcon}>🍴</div><div style={S.spinnerText}>Wird geladen…</div></div>
   if (db.error)   return <div style={S.spinner}><div style={{fontSize:36}}>⚠️</div><div style={{fontSize:16,fontWeight:700}}>Verbindungsfehler</div><div style={{fontSize:13,color:'#aaa',maxWidth:320,textAlign:'center'}}>{db.error}</div><div style={{fontSize:12,color:'#bbb'}}>Supabase-URL und API-Key prüfen.</div></div>
   if (!currentAccount) return <LoginScreen onLogin={async (name, pw) => setCurrentAccount(await db.login(name, pw))} />
+
+  /* ═══════════ ROOM HEADING INPUT ═══════════ */
+  const RoomHeadingInput = ({ date, roomId, value }) => {
+    const [editing, setEditing] = useState(false)
+    const [text, setText] = useState(value)
+
+    const save = async () => {
+      await db.setRoomHeading(date, roomId, text)
+      setEditing(false)
+      if (text.trim()) showToast('Überschrift gespeichert ✓')
+    }
+
+    if (editing) return (
+      <div style={{ display:'flex', gap:6, marginTop:6, alignItems:'center' }}>
+        <input
+          style={{ ...S.input, flex:1, padding:'6px 10px', fontSize:13 }}
+          placeholder="z.B. Tanz in den Mai"
+          value={text}
+          onChange={e => setText(e.target.value)}
+          onKeyDown={e => { if (e.key==='Enter') save(); if (e.key==='Escape') setEditing(false) }}
+          autoFocus
+        />
+        <button style={S.confirmBtn} onClick={save} style={{ padding:'6px 14px', background:'#C8960A', border:'none', borderRadius:8, color:'#fff', cursor:'pointer', fontSize:12, fontFamily:'inherit' }}>✓</button>
+        <button onClick={() => setEditing(false)} style={{ padding:'6px 10px', background:'transparent', border:'1px solid #D5CFC4', borderRadius:8, color:'#aaa', cursor:'pointer', fontSize:12, fontFamily:'inherit' }}>✕</button>
+      </div>
+    )
+
+    return (
+      <div style={{ display:'flex', alignItems:'center', gap:6, marginTop: value ? 4 : 2 }}>
+        {value
+          ? <span style={S.roomHeadingBadge}>🎯 {value}</span>
+          : null
+        }
+        <button style={S.roomHeadingBtn} onClick={() => { setText(value); setEditing(true) }}>
+          {value ? '✏️' : '+ Überschrift'}
+        </button>
+      </div>
+    )
+  }
 
   /* ═══════════ SHIFT CARD ═══════════ */
   const ShiftCard = ({ shift, cardIsChef=false, isEmployee=false }) => {
@@ -956,24 +1002,51 @@ export default function App() {
                       </div>
                     </div>
 
-                    {/* Grouped by date */}
+                    {/* Grouped: Datum → Raum → Uhrzeit */}
                     {groupedShifts.length===0 && <div style={S.empty}>Keine Schichten gefunden.</div>}
-                    {groupedShifts.map(([date, shifts]) => {
+                    {groupedShifts.map(({ date, roomGroups, total }) => {
                       const unavailOnDay = db.unavailable.filter(u => u.date === date)
                       return (
                         <div key={date} style={S.dayGroup}>
+                          {/* Tag-Header */}
                           <div style={S.dayGroupHeader}>
                             <span style={S.dayGroupDate}>{fmtLong(date)}</span>
-                            <span style={S.dayGroupCount}>{shifts.length} Schicht{shifts.length>1?'en':''}</span>
+                            <span style={S.dayGroupCount}>{total} Schicht{total>1?'en':''}</span>
                             {unavailOnDay.length>0 && (
                               <span style={S.dayGroupUnavail}>
                                 ⚠️ {unavailOnDay.map(u => getEmp(u.employeeId)?.name).filter(Boolean).join(', ')} abwesend
                               </span>
                             )}
                           </div>
-                          <div style={S.shiftGrid}>
-                            {shifts.map(s=><ShiftCard key={s.id} shift={s} cardIsChef />)}
-                          </div>
+
+                          {/* Raum-Gruppen */}
+                          {roomGroups.map(([roomKey, roomShifts]) => {
+                            const room = roomKey === '__no_room__' ? null : getRoom(roomKey)
+                            const heading = roomKey === '__no_room__' ? '' : db.getRoomHeading(date, roomKey)
+                            return (
+                              <div key={roomKey} style={S.roomGroup}>
+                                {/* Raum-Header */}
+                                <div style={S.roomGroupHeader}>
+                                  <div style={S.roomGroupTitle}>
+                                    {room ? <span style={S.roomBadge}>{room.icon} {room.name}</span>
+                                           : <span style={{ ...S.roomBadge, color:'#bbb', borderColor:'#e0e0e0', background:'#fafafa' }}>— kein Raum</span>}
+                                    <span style={S.roomGroupCount}>{roomShifts.length}x</span>
+                                  </div>
+                                  {/* Editierbare Überschrift */}
+                                  {room && (
+                                    <RoomHeadingInput
+                                      date={date}
+                                      roomId={roomKey}
+                                      value={heading}
+                                    />
+                                  )}
+                                </div>
+                                <div style={S.shiftGrid}>
+                                  {roomShifts.map(s=><ShiftCard key={s.id} shift={s} cardIsChef />)}
+                                </div>
+                              </div>
+                            )
+                          })}
                         </div>
                       )
                     })}
@@ -1034,6 +1107,7 @@ export default function App() {
             <div style={S.tabBar}>
               <button style={mitTab==='schichtplan' ?S.tabActive:S.tab} onClick={()=>setMitTab('schichtplan')}>📅 Mein Schichtplan</button>
               <button style={mitTab==='offen'       ?S.tabActive:S.tab} onClick={()=>setMitTab('offen')}>📋 Offene Schichten</button>
+              <button style={mitTab==='tagesuebersicht' ?S.tabActive:S.tab} onClick={()=>setMitTab('tagesuebersicht')}>👥 Tagesübersicht</button>
               <button style={mitTab==='kalender'    ?S.tabActive:S.tab} onClick={()=>setMitTab('kalender')}>🗓️ Kalender</button>
               <button style={mitTab==='konto'       ?S.tabActive:S.tab} onClick={()=>setMitTab('konto')}>👤 Mein Konto</button>
             </div>
@@ -1151,6 +1225,119 @@ export default function App() {
 
                   {mitTab==='kalender'&&<Calendar monday={calMit} setMonday={setCalMit} calIsChef={false} />}
                   {mitTab==='konto' && <MeinKontoTab />}
+
+                  {/* ── Tagesübersicht ── */}
+                  {mitTab==='tagesuebersicht' && (() => {
+                    // Get all unique future dates that have shifts
+                    const futureDates = [...new Set(
+                      db.shifts.filter(s => s.date >= today).map(s => s.date)
+                    )].sort()
+
+                    if (!selectedDayOverview) {
+                      // Date picker
+                      return (
+                        <div>
+                          <h3 style={S.subTitle}>📅 Tag auswählen</h3>
+                          <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
+                            {futureDates.length === 0 && <div style={S.empty}>Keine zukünftigen Schichten vorhanden.</div>}
+                            {futureDates.map(date => {
+                              const dayShifts = db.shifts.filter(s => s.date === date)
+                              const assigned = dayShifts.filter(s => s.assigned).length
+                              const open = dayShifts.filter(s => !s.assigned).length
+                              const myShift = dayShifts.find(s => s.assigned === activeEmployee.id)
+                              return (
+                                <button key={date}
+                                  style={{ display:'flex', alignItems:'center', gap:12, padding:'14px 16px', background: myShift?'#EDF7F0':'#FFFDF8', border:`1px solid ${myShift?'#2A9D6E44':'#E0DBD0'}`, borderRadius:12, cursor:'pointer', textAlign:'left', fontFamily:'inherit' }}
+                                  onClick={() => setSelectedDayOverview(date)}>
+                                  <div style={{ flex:1 }}>
+                                    <div style={{ fontSize:15, fontWeight:700, color:'#1a1a1a', marginBottom:3 }}>{fmtLong(date)}</div>
+                                    <div style={{ display:'flex', gap:8 }}>
+                                      <span style={{ fontSize:11, color:'#2A9D6E' }}>✓ {assigned} eingeteilt</span>
+                                      <span style={{ fontSize:11, color:'#C8960A' }}>○ {open} offen</span>
+                                      {myShift && <span style={{ fontSize:11, color:'#2A9D6E', fontWeight:700 }}>⭐ Du bist dabei</span>}
+                                    </div>
+                                  </div>
+                                  <span style={{ color:'#aaa', fontSize:18 }}>›</span>
+                                </button>
+                              )
+                            })}
+                          </div>
+                        </div>
+                      )
+                    }
+
+                    // Day detail view — all shifts grouped by room
+                    const date = selectedDayOverview
+                    const dayShifts = db.shifts.filter(s => s.date === date)
+                    const byRoom = {}
+                    dayShifts.forEach(s => {
+                      const key = s.room || '__no_room__'
+                      if (!byRoom[key]) byRoom[key] = []
+                      byRoom[key].push(s)
+                    })
+                    Object.values(byRoom).forEach(arr => arr.sort((a,b) => a.time.localeCompare(b.time)))
+                    const roomGroups = Object.entries(byRoom).sort(([a],[b]) => {
+                      if (a === '__no_room__') return 1
+                      if (b === '__no_room__') return -1
+                      const nameA = db.rooms.find(r => r.id === a)?.name || a
+                      const nameB = db.rooms.find(r => r.id === b)?.name || b
+                      return nameA.localeCompare(nameB)
+                    })
+
+                    return (
+                      <div>
+                        <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:16 }}>
+                          <button style={{ ...S.filterBtn, padding:'6px 12px' }} onClick={() => setSelectedDayOverview(null)}>‹ Zurück</button>
+                          <h3 style={{ ...S.sectionTitle, marginBottom:0 }}>{fmtLong(date)}</h3>
+                        </div>
+
+                        {roomGroups.map(([roomKey, roomShifts]) => {
+                          const room = roomKey === '__no_room__' ? null : getRoom(roomKey)
+                          const heading = roomKey === '__no_room__' ? '' : db.getRoomHeading(date, roomKey)
+                          return (
+                            <div key={roomKey} style={S.roomGroup}>
+                              <div style={S.roomGroupHeader}>
+                                <div style={S.roomGroupTitle}>
+                                  {room
+                                    ? <span style={S.roomBadge}>{room.icon} {room.name}</span>
+                                    : <span style={{ ...S.roomBadge, color:'#bbb', borderColor:'#e0e0e0', background:'#fafafa' }}>— kein Raum</span>}
+                                </div>
+                                {heading && <span style={S.roomHeadingBadge}>🎯 {heading}</span>}
+                              </div>
+
+                              {/* Compact shift rows for day overview */}
+                              <div style={{ display:'flex', flexDirection:'column', gap:6 }}>
+                                {roomShifts.map(s => {
+                                  const cat = CATEGORIES[s.category]
+                                  const emp = s.assigned ? getEmp(s.assigned) : null
+                                  const isMe = s.assigned === activeEmployee.id
+                                  return (
+                                    <div key={s.id} style={{ display:'flex', alignItems:'center', gap:10, padding:'10px 12px', background: isMe?'#EDF7F0':s.assigned?'#FFFDF8':'#FFFBF0', border:`1px solid ${isMe?'#2A9D6E44':'#E0DBD0'}`, borderRadius:10 }}>
+                                      <span style={{ ...S.catBadge, background:cat.color+'22', color:cat.color, flexShrink:0 }}>{cat.icon}</span>
+                                      <div style={{ flex:1, minWidth:0 }}>
+                                        <div style={{ fontSize:13, fontWeight:700, color:'#1a1a1a' }}>{s.label}</div>
+                                        <div style={{ fontSize:12, color:'#888' }}>🕐 {s.time}</div>
+                                      </div>
+                                      {emp ? (
+                                        <div style={{ display:'flex', alignItems:'center', gap:6 }}>
+                                          <div style={{ ...S.empAvatar, width:28, height:28, fontSize:10 }}>{emp.avatar}</div>
+                                          <span style={{ fontSize:12, fontWeight: isMe?700:400, color: isMe?'#2A9D6E':'#555' }}>
+                                            {isMe ? '⭐ Du' : emp.name}
+                                          </span>
+                                        </div>
+                                      ) : (
+                                        <span style={{ fontSize:11, color:'#C8960A', background:'#FFF8EC', padding:'2px 8px', borderRadius:8, border:'1px solid #E8C54744' }}>offen</span>
+                                      )}
+                                    </div>
+                                  )
+                                })}
+                              </div>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    )
+                  })()}
                 </>
               )
             })()}
