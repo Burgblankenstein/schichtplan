@@ -154,9 +154,10 @@ export default function App() {
         const rowsHtml = shifts.map(s => {
           const cat = CATEGORIES[s.category]
           const emp = s.assigned ? getEmp(s.assigned)?.name : null
+          const noteHtml = s.note ? `<div style="font-size:9px;color:#7B5EA7;font-style:italic">📌 ${s.note}</div>` : ''
           return `<tr>
             <td class="col-time">${s.time.replace('–','–')}</td>
-            <td class="col-shift">${cat.icon} ${s.label}</td>
+            <td class="col-shift">${cat.icon} ${s.label}${noteHtml}</td>
             <td class="col-cat">${cat.label}</td>
             <td class="col-emp">${emp ? `✓ ${emp}` : '<span class="open">offen</span>'}</td>
           </tr>`
@@ -490,6 +491,47 @@ ${dayBlocks || '<p style="color:#aaa;text-align:center;padding:20px">Keine Schic
     )
   }
 
+  /* ═══════════ SHIFT NOTE EDITOR ═══════════ */
+  const ShiftNoteEditor = ({ shiftId, note }) => {
+    const [editing, setEditing] = useState(false)
+    const [text, setText] = useState(note)
+
+    const save = async () => {
+      await db.updateShiftNote(shiftId, text)
+      setEditing(false)
+      if (text.trim()) showToast('Notiz gespeichert ✓')
+      else showToast('Notiz entfernt')
+    }
+
+    if (editing) return (
+      <div style={{ marginBottom: 8 }}>
+        <textarea
+          style={{ ...S.input, height:60, resize:'none', fontSize:12, lineHeight:1.5, marginBottom:5 }}
+          placeholder="Notiz für Mitarbeiter..."
+          value={text}
+          onChange={e => setText(e.target.value)}
+          autoFocus
+        />
+        <div style={{ display:'flex', gap:6 }}>
+          <button style={{ ...S.confirmBtn, flex:1, padding:'6px', fontSize:12 }} onClick={save}>Speichern</button>
+          <button style={{ ...S.cancelBtn, flex:1, padding:'6px', fontSize:12 }} onClick={() => { setText(note); setEditing(false) }}>Abbrechen</button>
+        </div>
+      </div>
+    )
+
+    return (
+      <div style={{ marginBottom: 8 }}>
+        {note
+          ? <div style={{ ...S.shiftNote, cursor:'pointer', display:'flex', justifyContent:'space-between', alignItems:'flex-start', gap:6 }} onClick={() => setEditing(true)}>
+              <span>📌 {note}</span>
+              <span style={{ fontSize:10, color:'#bbb', flexShrink:0 }}>✏️</span>
+            </div>
+          : <button style={S.addNoteBtn} onClick={() => setEditing(true)}>+ Notiz hinzufügen</button>
+        }
+      </div>
+    )
+  }
+
   /* ═══════════ SHIFT CARD ═══════════ */
   const ShiftCard = ({ shift, cardIsChef=false, isEmployee=false }) => {
     const live       = db.shifts.find(s => s.id === shift.id) || shift
@@ -521,6 +563,14 @@ ${dayBlocks || '<p style="color:#aaa;text-align:center;padding:20px">Keine Schic
 
         <div style={S.shiftName}>{live.label}</div>
         <div style={S.shiftTime}>🕐 {live.time}</div>
+
+        {/* Note field — shown to all, editable only by chef */}
+        {cardIsChef
+          ? <ShiftNoteEditor shiftId={live.id} note={live.note || ''} />
+          : live.note
+            ? <div style={S.shiftNote}>📌 {live.note}</div>
+            : null
+        }
 
         <div style={{ display:'flex', alignItems:'center', gap:6, marginBottom:8, flexWrap:'wrap' }}>
           {room ? <span style={S.roomBadge}>{room.icon} {room.name}</span>
@@ -939,6 +989,11 @@ ${dayBlocks || '<p style="color:#aaa;text-align:center;padding:20px">Keine Schic
               <option key={e.id} value={e.id}>{e.name}</option>
             ))}
           </select>
+          <label style={S.label}>Notiz (optional)</label>
+          <textarea style={{ ...S.input, height:60, resize:'none', fontSize:13, lineHeight:1.5 }}
+            placeholder="Hinweis für Mitarbeiter..."
+            value={form.note || ''}
+            onChange={e=>setForm({...form,note:e.target.value})} />
           <div style={S.modalActions}>
             <button style={S.cancelBtn} onClick={()=>setEditShift(null)}>Abbrechen</button>
             <button style={S.confirmBtn} onClick={async()=>{ await db.updateShift(form.id,form); setEditShift(null); showToast('Schicht gespeichert ✓') }}>Speichern</button>

@@ -3,7 +3,7 @@ import { supabase } from './supabase'
 import { mkInitials, fmtShort, CHEF_ID, CATEGORIES } from './constants'
 
 // employees.categories is now an array e.g. ['service','runner']
-const mapShift    = r => ({ id: r.id, date: r.date, label: r.label, time: r.time, category: r.category, room: r.room || '', applicants: r.applicants || [], assigned: r.assigned })
+const mapShift    = r => ({ id: r.id, date: r.date, label: r.label, time: r.time, category: r.category, room: r.room || '', applicants: r.applicants || [], assigned: r.assigned, note: r.note || '' })
 const mapEmployee = r => ({ id: r.id, name: r.name, categories: r.categories || [r.category].filter(Boolean), avatar: r.avatar })
 const mapRoom     = r => ({ id: r.id, name: r.name, icon: r.icon })
 const mapAccount  = r => ({ id: r.id, name: r.name, role: r.role, employeeId: r.employee_id, email: r.email || '' })
@@ -135,7 +135,7 @@ export default function useData() {
     const id = Date.now() + (Math.random() * 10000 | 0)
     const { error } = await supabase.from('shifts').insert({
       id, date: s.date, label: s.label, time: s.time,
-      category: s.category, room: s.room || null, applicants: [], assigned: null,
+      category: s.category, room: s.room || null, applicants: [], assigned: null, note: s.note || '',
     })
     if (error) throw error
     return id
@@ -162,6 +162,7 @@ export default function useData() {
     const { error } = await supabase.from('shifts').update({
       date: u.date, label: u.label, time: u.time,
       category: u.category, room: u.room || null, assigned: u.assigned ?? null,
+      note: u.note || '',
     }).eq('id', shiftId)
     if (error) throw error
   }
@@ -180,6 +181,10 @@ export default function useData() {
       `Du wurdest für „${shift.label}" am ${fmtShort(shift.date)} eingeteilt!`, shiftId,
       { employeeName: emp?.name || '', shiftLabel: shift.label, shiftDate: fmtShort(shift.date), shiftTime: shift.time, shiftIcon: cat.icon, category: cat.label, room: room?.name || '' }
     )
+  }
+
+  const updateShiftNote = async (shiftId, note) => {
+    await supabase.from('shifts').update({ note: note || '' }).eq('id', shiftId)
   }
 
   const unassignEmployee = async (sid) => supabase.from('shifts').update({ assigned: null }).eq('id', sid)
@@ -308,7 +313,7 @@ export default function useData() {
   return {
     shifts, employees, rooms, accounts, notifications, unavailable, roomHeadings, loading, error,
     login, markAllRead, clearNotif,
-    addShift, addShiftsBulk, updateShift,
+    addShift, addShiftsBulk, updateShift, updateShiftNote,
     deleteShift, assignEmployee, unassignEmployee, declineShift, changeRoom,
     applyForShift, withdrawApplication,
     addUnavailableDay, removeUnavailableDay,

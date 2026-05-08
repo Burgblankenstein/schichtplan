@@ -70,6 +70,8 @@ export const S = {
   shiftDateSm:  { fontSize:11, color:'#999' },
   shiftName:    { fontSize:16, fontWeight:700, marginBottom:3, color:'#1a1a1a' },
   shiftTime:    { fontSize:13, color:'#888', marginBottom:6 },
+  shiftNote:    { fontSize:12, color:'#7B5EA7', background:'#EDE8FF', border:'1px solid #C9B8F088', borderRadius:8, padding:'5px 10px', marginBottom:8, lineHeight:1.5 },
+  addNoteBtn:   { fontSize:11, color:'#bbb', background:'transparent', border:'1px dashed #D5CFC4', borderRadius:6, padding:'3px 10px', cursor:'pointer', fontFamily:'inherit', marginBottom:8, display:'block' },
   roomBadge:    { display:'inline-flex', alignItems:'center', gap:4, fontSize:11, padding:'3px 9px', borderRadius:10, background:'#6B8FB522', color:'#4a6f95', fontWeight:600, border:'1px solid #6B8FB544' },
   editRoomBtn:  { padding:'2px 6px', background:'transparent', border:'1px solid #E0DBD0', borderRadius:6, cursor:'pointer', fontSize:11, color:'#bbb' },
   templateBadge:{ display:'inline-flex', alignItems:'center', gap:4, fontSize:11, padding:'2px 8px', borderRadius:10, background:'#E8C54722', color:'#8a6800', fontWeight:600, border:'1px solid #E8C54744', marginBottom:6 },
