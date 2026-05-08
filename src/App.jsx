@@ -154,24 +154,23 @@ export default function App() {
         const rowsHtml = shifts.map(s => {
           const cat = CATEGORIES[s.category]
           const emp = s.assigned ? getEmp(s.assigned)?.name : null
-          return `<div class="shift-row">
-            <span class="shift-time">${s.time.split('–')[0].trim()}</span>
-            <span class="shift-label">${cat.icon} ${s.label}</span>
-            ${emp
-              ? `<span class="shift-emp">✓ ${emp}</span>`
-              : `<span class="shift-open">offen</span>`}
-          </div>`
+          return `<tr>
+            <td class="col-time">${s.time.replace('–','–')}</td>
+            <td class="col-shift">${cat.icon} ${s.label}</td>
+            <td class="col-cat">${cat.label}</td>
+            <td class="col-emp">${emp ? `✓ ${emp}` : '<span class="open">offen</span>'}</td>
+          </tr>`
         }).join('')
         return `<div class="room-block">
           <div class="room-title">${roomTitle}</div>
           ${headingHtml}
-          ${rowsHtml}
+          <table><tbody>${rowsHtml}</tbody></table>
         </div>`
       }).join('')
 
       return `<div class="day-block">
-        <div class="day-header">${day.toLocaleDateString('de-DE',{weekday:'short',day:'2-digit',month:'2-digit'})}</div>
-        ${roomHtml || '<div class="empty-day">—</div>'}
+        <div class="day-header">${day.toLocaleDateString('de-DE',{weekday:'long',day:'2-digit',month:'2-digit',year:'numeric'})}</div>
+        ${roomHtml || '<div style="padding:4px 8px;color:#ddd;font-size:10px">Keine Schichten</div>'}
       </div>`
     }).join('')
 
@@ -181,30 +180,30 @@ export default function App() {
 <title>Schichtplan – ${weekLabel}</title>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { font-family: Arial, sans-serif; color: #1a1a1a; background: #fff; padding: 12px 16px; font-size: 11px; }
-  .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; border-bottom: 2px solid #C8960A; padding-bottom: 6px; }
-  .logo { font-size: 14px; font-weight: 700; letter-spacing: 2px; }
+  body { font-family: Arial, sans-serif; color: #1a1a1a; background: #fff; padding: 10px 14px; font-size: 10px; }
+  .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; border-bottom: 2px solid #C8960A; padding-bottom: 5px; }
+  .logo { font-size: 13px; font-weight: 700; letter-spacing: 2px; }
   .logo span { color: #C8960A; }
-  .week { font-size: 11px; color: #888; }
-  .days { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; }
-  .day-block { border: 1px solid #E0DBD0; border-radius: 6px; overflow: hidden; page-break-inside: avoid; }
-  .day-header { font-size: 10px; font-weight: 700; background: #F5F3EE; padding: 4px 6px; border-bottom: 1px solid #E0DBD0; border-left: 3px solid #C8960A; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .room-block { padding: 3px 5px; border-bottom: 1px solid #F0EDE6; }
+  .week { font-size: 10px; color: #888; }
+  .day-block { margin-bottom: 8px; page-break-inside: avoid; border: 1px solid #E0DBD0; border-radius: 5px; overflow: hidden; }
+  .day-header { font-size: 11px; font-weight: 700; background: #F5F3EE; padding: 4px 8px; border-bottom: 1px solid #E0DBD0; border-left: 3px solid #C8960A; }
+  .room-block { padding: 2px 6px 4px 6px; border-bottom: 1px solid #F5F3EE; }
   .room-block:last-child { border-bottom: none; }
-  .room-title { font-size: 9px; font-weight: 700; color: #6B8FB5; margin-bottom: 2px; }
-  .room-heading { font-size: 9px; color: #7B5EA7; background: #EDE8FF; padding: 1px 5px; border-radius: 4px; display: inline-block; margin-bottom: 2px; }
-  .shift-row { display: flex; align-items: baseline; gap: 4px; padding: 1px 0; border-bottom: 1px dotted #F0EDE6; font-size: 10px; }
-  .shift-row:last-child { border-bottom: none; }
-  .shift-time { color: #888; white-space: nowrap; min-width: 70px; flex-shrink: 0; }
-  .shift-label { font-weight: 600; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .shift-emp { color: #2A9D6E; white-space: nowrap; text-align: right; flex-shrink: 0; }
-  .shift-open { color: #C8960A; font-style: italic; }
-  .shift-cat { font-size: 9px; color: #aaa; }
-  .footer { margin-top: 8px; font-size: 9px; color: #bbb; text-align: center; border-top: 1px solid #eee; padding-top: 4px; }
-  .empty-day { font-size: 10px; color: #ddd; text-align: center; padding: 8px; }
+  .room-title { font-size: 9px; font-weight: 700; color: #6B8FB5; padding: 2px 0 1px 0; }
+  .room-heading { font-size: 9px; color: #7B5EA7; background: #EDE8FF; padding: 1px 5px; border-radius: 3px; display: inline-block; margin-bottom: 2px; }
+  table { width: 100%; border-collapse: collapse; }
+  tr { border-bottom: 1px dotted #EDE8DF; }
+  tr:last-child { border-bottom: none; }
+  td { padding: 2px 4px; vertical-align: middle; font-size: 10px; }
+  .col-time  { width: 80px; color: #888; white-space: nowrap; }
+  .col-shift { width: 100px; font-weight: 600; }
+  .col-cat   { width: 80px; font-size: 9px; color: #aaa; }
+  .col-emp   { color: #2A9D6E; }
+  .open { color: #C8960A; font-style: italic; }
+  .footer { margin-top: 6px; font-size: 8px; color: #bbb; text-align: center; border-top: 1px solid #eee; padding-top: 4px; }
   @media print {
-    body { padding: 8px; }
-    .days { gap: 4px; }
+    body { padding: 6px 10px; }
+    .day-block { page-break-inside: avoid; }
   }
 </style>
 </head><body>
@@ -212,9 +211,7 @@ export default function App() {
   <div class="logo">🍴 SCHICHT<span>PLAN</span></div>
   <div class="week">${weekLabel}</div>
 </div>
-<div class="days">
-${dayBlocks || '<p style="color:#aaa;text-align:center;padding:20px;grid-column:1/-1">Keine Schichten in dieser Woche</p>'}
-</div>
+${dayBlocks || '<p style="color:#aaa;text-align:center;padding:20px">Keine Schichten in dieser Woche</p>'}
 <div class="footer">Erstellt mit SchichtPlan · ${new Date().toLocaleDateString('de-DE',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'})}</div>
 </body></html>`
 
