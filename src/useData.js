@@ -3,7 +3,7 @@ import { supabase } from './supabase'
 import { mkInitials, fmtShort, CHEF_ID, CATEGORIES } from './constants'
 
 // employees.categories is now an array e.g. ['service','runner']
-const mapShift    = r => ({ id: r.id, date: r.date, label: r.label, time: r.time, category: r.category, room: r.room || '', applicants: r.applicants || [], assigned: r.assigned, note: r.note || '' })
+const mapShift    = r => ({ id: r.id, date: r.date, label: r.label, time: r.time, category: r.category, room: r.room || '', applicants: r.applicants || [], assigned: r.assigned, note: r.note || '', declinedBy: r.declined_by || [] })
 const mapEmployee = r => ({ id: r.id, name: r.name, categories: r.categories || [r.category].filter(Boolean), avatar: r.avatar })
 const mapRoom     = r => ({ id: r.id, name: r.name, icon: r.icon })
 const mapAccount  = r => ({ id: r.id, name: r.name, role: r.role, employeeId: r.employee_id, email: r.email || '' })
@@ -145,17 +145,47 @@ export default function useData() {
     const id = await _insertShift(s)
     const room = rooms.find(r => r.id === s.room)
     const cat  = CATEGORIES[s.category]
-    // notify employees who have this category in their categories array
-    for (const e of allEmployees.filter(e => (e.categories || []).includes(s.category))) {
-      await pushNotif(e.id, 'new_shift',
+    // fire notifications in parallel — don't await each one
+    Promise.all(allEmployees
+      .filter(e => (e.categories || []).includes(s.category))
+      .map(e => pushNotif(e.id, 'new_shift',
         `Neue Schicht: ${s.label} (${cat.label}) am ${fmtShort(s.date)}`, id,
         { employeeName: e.name, shiftLabel: s.label, shiftDate: fmtShort(s.date), shiftTime: s.time, shiftIcon: cat.icon, category: cat.label, room: room?.name || '' }
-      )
-    }
+      ))
+    ).catch(e => console.warn('Notification error:', e))
   }
 
   const addShiftsBulk = async (shiftsArr, allEmployees) => {
-    for (const s of shiftsArr) await addShift(s, allEmployees)
+    if (shiftsArr.length === 0) return
+
+    // Batch insert all shifts in one DB call
+    const rows = shiftsArr.map(s => ({
+      id: Date.now() + (Math.random() * 100000 | 0) + Math.random(),
+      date: s.date, label: s.label, time: s.time,
+      category: s.category, room: s.room || null,
+      applicants: [], assigned: null, note: s.note || '',
+    }))
+    // Ensure unique IDs
+    rows.forEach((r, i) => { r.id = Date.now() + i * 7 + (Math.random() * 1000 | 0) })
+
+    const { error } = await supabase.from('shifts').insert(rows)
+    if (error) throw error
+
+    // Fire all notifications in parallel (non-blocking)
+    const notifPromises = []
+    for (let i = 0; i < shiftsArr.length; i++) {
+      const s   = shiftsArr[i]
+      const id  = rows[i].id
+      const cat = CATEGORIES[s.category]
+      const room = rooms.find(r => r.id === s.room)
+      for (const e of allEmployees.filter(e => (e.categories || []).includes(s.category))) {
+        notifPromises.push(pushNotif(e.id, 'new_shift',
+          `Neue Schicht: ${s.label} (${cat.label}) am ${fmtShort(s.date)}`, id,
+          { employeeName: e.name, shiftLabel: s.label, shiftDate: fmtShort(s.date), shiftTime: s.time, shiftIcon: cat.icon, category: cat.label, room: room?.name || '' }
+        ))
+      }
+    }
+    Promise.all(notifPromises).catch(e => console.warn('Notification error:', e))
   }
 
   const updateShift = async (shiftId, u) => {
@@ -191,22 +221,22 @@ export default function useData() {
   const changeRoom       = async (sid, roomId) => supabase.from('shifts').update({ room: roomId || null }).eq('id', sid)
 
   const declineShift = async (shiftId, shift, employee) => {
-    // Remove assignment and remove from applicants
+    const newDeclinedBy = [...(shift.declinedBy || []), employee.id].filter((v,i,a) => a.indexOf(v)===i)
     await supabase.from('shifts').update({
       assigned: null,
-      applicants: shift.applicants.filter(id => id !== employee.id)
+      applicants: shift.applicants.filter(id => id !== employee.id),
+      declined_by: newDeclinedBy,
     }).eq('id', shiftId)
-    // Notify chef
     const cat = CATEGORIES[shift.category]
     await pushNotif(
       CHEF_ID, 'declined',
-      `${employee.name} hat die Schicht „${shift.label}" am ${fmtShort(shift.date)} abgelehnt!`,
+      `${employee.name} hat die Schicht "${shift.label}" am ${fmtShort(shift.date)} abgelehnt!`,
       shiftId,
       { employeeName: employee.name, shiftLabel: shift.label, shiftDate: fmtShort(shift.date), shiftTime: shift.time, shiftIcon: cat.icon, category: cat.label, room: rooms.find(r => r.id === shift.room)?.name || '' }
     )
   }
 
-  const applyForShift = async (shiftId, shift, employee, note = '') => {
+    const applyForShift = async (shiftId, shift, employee, note = '') => {
     if (shift.applicants.includes(employee.id)) return
     await supabase.from('shifts').update({ applicants: [...shift.applicants, employee.id] }).eq('id', shiftId)
     const cat  = CATEGORIES[shift.category]

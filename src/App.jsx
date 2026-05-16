@@ -540,6 +540,8 @@ ${dayBlocks || '<p style="color:#aaa;text-align:center;padding:20px">Keine Schic
     const room       = getRoom(live.room)
     const hasApplied = live.applicants.includes(activeEmployee?.id)
     const editing    = editingRoomSid === live.id
+    const declinedBy = live.declinedBy || []
+    const wasDeclined = cardIsChef && declinedBy.length > 0
 
     // Check if any applicant is unavailable on this date
     const unavailApplicants = live.applicants.filter(eid =>
@@ -547,7 +549,12 @@ ${dayBlocks || '<p style="color:#aaa;text-align:center;padding:20px">Keine Schic
     )
 
     return (
-      <div style={{ ...S.shiftCard, borderTop:`3px solid ${cat.color}` }}>
+      <div style={{ ...S.shiftCard, borderTop:`3px solid ${wasDeclined ? '#E07070' : cat.color}`, background: wasDeclined ? '#FFF5F5' : '#FFFDF8' }}>
+        {wasDeclined && (
+          <div style={{ fontSize:11, fontWeight:700, color:'#E07070', background:'#FFE8E8', borderRadius:6, padding:'3px 8px', marginBottom:8, border:'1px solid #F5C6C6' }}>
+            ❌ Abgelehnt von: {declinedBy.map(id => getEmp(id)?.name || '?').join(', ')}
+          </div>
+        )}
         <div style={S.shiftCardTop}>
           <div style={S.shiftMeta}>
             <span style={{ ...S.catBadge, background:cat.color+'22', color:cat.color }}>{cat.icon} {cat.label}</span>
@@ -847,10 +854,11 @@ ${dayBlocks || '<p style="color:#aaa;text-align:center;padding:20px">Keine Schic
 
   /* ═══════════ BULK SHIFT MODAL (neue Version mit individuellen Zeiten) ═══════════ */
   const BulkShiftModal = () => {
-    const [date,      setDate]      = useState('')
-    const [template,  setTemplate]  = useState('ala_carte')
-    const [customLabel,setCustomLabel] = useState('')
-    const [room,      setRoom]      = useState('')
+    const [date,       setDate]       = useState('')
+    const [template,   setTemplate]   = useState('ala_carte')
+    const [customLabel,setCustomLabel]= useState('')
+    const [eventStart, setEventStart] = useState('')
+    const [room,       setRoom]       = useState('')
     // slots: array of { cat, time }
     const [slots, setSlots] = useState([])
 
@@ -870,7 +878,8 @@ ${dayBlocks || '<p style="color:#aaa;text-align:center;padding:20px">Keine Schic
       if (!date)          { showToast('Bitte Datum auswählen'); return }
       if (slots.length===0) { showToast('Mindestens 1 Person auswählen'); return }
       const label = template === 'custom' ? (customLabel || 'Schicht') : selectedTmpl.label
-      const shifts = slots.map(s => ({ date, label, time: s.time, category: s.cat, room }))
+      const noteVal = eventStart.trim() ? `Beginn Veranstaltung: ${eventStart.trim()}` : ''
+      const shifts = slots.map(s => ({ date, label, time: s.time, category: s.cat, room, note: noteVal }))
       await db.addShiftsBulk(shifts, db.employees)
       setShowBulkShift(false)
       showToast(`${shifts.length} Schicht${shifts.length > 1 ? 'en' : ''} erstellt ✓`)
@@ -898,6 +907,9 @@ ${dayBlocks || '<p style="color:#aaa;text-align:center;padding:20px">Keine Schic
               <input style={S.input} placeholder="z.B. Firmenfeier" value={customLabel} onChange={e => setCustomLabel(e.target.value)} />
             </>
           )}
+
+          <label style={S.label}>Beginn Veranstaltung (optional)</label>
+          <input style={S.input} placeholder="z.B. 18:30 Uhr" value={eventStart} onChange={e => setEventStart(e.target.value)} />
 
           <label style={S.label}>Raum (optional)</label>
           <select style={S.select} value={room} onChange={e => setRoom(e.target.value)}>
