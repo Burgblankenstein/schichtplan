@@ -10,11 +10,14 @@ export const CHEF_ID = 'chef'
 export const WD = ['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So']
 
 export const SHIFT_TEMPLATES = [
-  { id: 'ala_carte',    label: 'à la Carte',   icon: '🍽️', defaultTime: '17:00 – 23:00' },
-  { id: 'hochzeit',     label: 'Hochzeit',      icon: '💍', defaultTime: '14:00 – 00:00' },
-  { id: 'ritteressen',  label: 'Ritteressen',   icon: '⚔️', defaultTime: '18:00 – 23:00' },
-  { id: 'veranstaltung',label: 'Veranstaltung', icon: '🎉', defaultTime: '16:00 – 22:00' },
-  { id: 'custom',       label: 'Eigene…',       icon: '✏️', defaultTime: '' },
+  { id: 'ala_carte',      label: 'à la Carte',      icon: '🍽️', defaultTime: '17:00 – 23:00' },
+  { id: 'hochzeit',       label: 'Hochzeit',         icon: '💍', defaultTime: '14:00 – 00:00' },
+  { id: 'ritteressen',    label: 'Ritteressen',      icon: '⚔️', defaultTime: '18:00 – 23:00' },
+  { id: 'veranstaltung',  label: 'Veranstaltung',    icon: '🎉', defaultTime: '16:00 – 22:00' },
+  { id: 'sonntags_buffet',label: 'Sonntags Buffet',  icon: '🥗', defaultTime: '11:00 – 16:00' },
+  { id: 'firmenfeier',    label: 'Firmenfeier',      icon: '🏢', defaultTime: '17:00 – 23:00' },
+  { id: 'kaffeegeschaeft',label: 'Kaffeegeschäft',   icon: '☕', defaultTime: '13:00 – 19:00' },
+  { id: 'custom',         label: 'Eigene…',          icon: '✏️', defaultTime: '' },
 ]
 
 export function getMonday(d) {

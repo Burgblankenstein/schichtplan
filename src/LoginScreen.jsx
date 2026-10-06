@@ -27,13 +27,15 @@ export default function LoginScreen({ onLogin }) {
   const [error,    setError]    = useState('')
   const [showPw,   setShowPw]   = useState(false)
   const [loading,  setLoading]  = useState(false)
+  const [remember, setRemember] = useState(() => { try { return localStorage.getItem('sp_remember') === '1' } catch { return false } })
 
   const handleLogin = async () => {
     if (!name.trim() || !password.trim()) { setError('Bitte Name und Passwort eingeben.'); return }
     setLoading(true)
     setError('')
     try {
-      await onLogin(name.trim(), password)
+      try { localStorage.setItem('sp_remember', remember ? '1' : '0') } catch {}
+      await onLogin(name.trim(), password, remember)
     } catch (e) {
       setError(e.message || 'Name oder Passwort falsch.')
     } finally {
@@ -71,6 +73,12 @@ export default function LoginScreen({ onLogin }) {
         </div>
 
         {error && <div style={LS.error}>{error}</div>}
+
+        <label style={{ display:'flex', alignItems:'center', gap:8, marginTop:14, cursor:'pointer', userSelect:'none' }}>
+          <input type="checkbox" checked={remember} onChange={e => setRemember(e.target.checked)}
+            style={{ width:16, height:16, accentColor:'#C8960A', cursor:'pointer' }} />
+          <span style={{ fontSize:13, color:'#666' }}>Angemeldet bleiben</span>
+        </label>
 
         <button style={{ ...LS.loginBtn, opacity: loading ? 0.7 : 1 }} onClick={handleLogin} disabled={loading}>
           {loading ? 'Wird angemeldet…' : 'Anmelden →'}

@@ -5,8 +5,8 @@ import { supabase } from './supabase'
 import { S } from './styles'
 import { CATEGORIES, CHEF_ID, WD, SHIFT_TEMPLATES, getMonday, addDays, toDS, fmtLong, fmtShort, fmtTime, mkInitials } from './constants'
 
-const notifIcon  = t => ({ application:'📬', assigned:'🎉', new_shift:'📋', declined:'❌' }[t] || '🔔')
-const notifColor = t => ({ application:'#C8960A', assigned:'#2A9D6E', new_shift:'#6B8FB5', declined:'#E07070' }[t] || '#888')
+const notifIcon  = t => ({ application:'📬', assigned:'🎉', new_shift:'📋', declined:'❌', shift_changed:'⏰', shift_cancelled:'🚫' }[t] || '🔔')
+const notifColor = t => ({ application:'#C8960A', assigned:'#2A9D6E', new_shift:'#6B8FB5', declined:'#E07070', shift_changed:'#E07070', shift_cancelled:'#E07070' }[t] || '#888')
 
 /* ── Category pills — supports multi-select ── */
 const CatPills = ({ value, onChange, multi = false }) => (
@@ -40,7 +40,9 @@ const Input = ({ value, onChange, type = 'text', placeholder, style }) => (
 )
 
 export default function App() {
-  const [currentAccount, setCurrentAccount] = useState(null)
+  const [currentAccount, setCurrentAccount] = useState(() => {
+    try { const s = localStorage.getItem('sp_account'); return s ? JSON.parse(s) : null } catch { return null }
+  })
   const db = useData()
 
   const [chefTab,    setChefTab]    = useState('liste')
@@ -416,9 +418,13 @@ ${dayBlocks || '<p style="color:#aaa;text-align:center;padding:20px">Keine Schic
             const isUnavail    = db.unavailable.some(u => u.employeeId === emp.id && u.date === live.date)
             const primCat      = CATEGORIES[emp.categories?.[0]] || CATEGORIES.service
             const shiftsThisDay = db.shifts.filter(s => s.date === live.date && s.assigned === emp.id).length
+            // Bewerbungshinweis aus Notifications holen
+            const appNotif = db.notifications.find(n => n.type === 'application' && n.shiftId === live.id && n.text.startsWith(emp.name + ' '))
+            const appNote  = appNotif ? (appNotif.text.match(/— Hinweis: „(.+)“/) || appNotif.text.match(/— Hinweis: "(.+)"/))?.[1] : null
 
             return (
-              <div key={emp.id} style={{ ...S.applicantRow, padding:'10px 12px', background: isAssigned ? '#EDF7F0' : '#FFFDF8', borderRadius:10, border:'1px solid #E0DBD0', marginBottom:8 }}>
+              <div key={emp.id} style={{ ...S.applicantRow, padding:'10px 12px', background: isAssigned ? '#EDF7F0' : '#FFFDF8', borderRadius:10, border:'1px solid #E0DBD0', marginBottom:8, flexDirection:'column', alignItems:'stretch' }}>
+                <div style={{ display:'flex', alignItems:'center', gap:10 }}>
                 <div style={{ ...S.empAvatar, background: primCat.color+'33', color: primCat.color, width:38, height:38 }}>{emp.avatar}</div>
                 <div style={S.applicantInfo}>
                   <div style={S.applicantName}>{emp.name}</div>
@@ -436,6 +442,12 @@ ${dayBlocks || '<p style="color:#aaa;text-align:center;padding:20px">Keine Schic
                     Einteilen
                   </button>
                 )}
+                </div>
+                {appNote && (
+                  <div style={{ marginTop:8, padding:'6px 10px', background:'#FFF8EC', borderRadius:8, border:'1px solid #E8C54744', fontSize:12, color:'#7B5EA7' }}>
+                    💬 <em>{appNote}</em>
+                  </div>
+                )}
               </div>
             )
           })}
@@ -450,7 +462,12 @@ ${dayBlocks || '<p style="color:#aaa;text-align:center;padding:20px">Keine Schic
 
   if (db.loading) return <div style={S.spinner}><div style={S.spinnerIcon}>🍴</div><div style={S.spinnerText}>Wird geladen…</div></div>
   if (db.error)   return <div style={S.spinner}><div style={{fontSize:36}}>⚠️</div><div style={{fontSize:16,fontWeight:700}}>Verbindungsfehler</div><div style={{fontSize:13,color:'#aaa',maxWidth:320,textAlign:'center'}}>{db.error}</div><div style={{fontSize:12,color:'#bbb'}}>Supabase-URL und API-Key prüfen.</div></div>
-  if (!currentAccount) return <LoginScreen onLogin={async (name, pw) => setCurrentAccount(await db.login(name, pw))} />
+  if (!currentAccount) return <LoginScreen onLogin={async (name, pw, remember) => {
+    const acc = await db.login(name, pw)
+    if (remember) { try { localStorage.setItem('sp_account', JSON.stringify(acc)) } catch {} }
+    else { try { localStorage.removeItem('sp_account') } catch {} }
+    setCurrentAccount(acc)
+  }} />
 
   /* ═══════════ ROOM HEADING INPUT ═══════════ */
   const RoomHeadingInput = ({ date, roomId, value }) => {
@@ -563,7 +580,7 @@ ${dayBlocks || '<p style="color:#aaa;text-align:center;padding:20px">Keine Schic
           {cardIsChef && (
             <div style={{ display:'flex', gap:4 }}>
               <button style={{ ...S.editRoomBtn, fontSize:13 }} onClick={() => setEditShift({...live})}>✏️</button>
-              <button style={S.deleteBtn} onClick={async () => { await db.deleteShift(live.id); showToast('Schicht gelöscht') }}>✕</button>
+              <button style={S.deleteBtn} onClick={async () => { await db.deleteShift(live.id, live); showToast('Schicht gelöscht') }}>✕</button>
             </div>
           )}
         </div>
@@ -617,23 +634,32 @@ ${dayBlocks || '<p style="color:#aaa;text-align:center;padding:20px">Keine Schic
                 </button>
               </div>
               {live.applicants.length===0 && <div style={S.noApplicants}>Noch keine Bewerbungen</div>}
-              {live.applicants.slice(0,2).map(eid => {
+              {live.applicants.slice(0,3).map(eid => {
                 const emp=getEmp(eid); if(!emp) return null
                 const ec=CATEGORIES[emp.categories?.[0] || 'service']
                 const isUnavail = db.unavailable.some(u => u.employeeId === eid && u.date === live.date)
+                const appNotif = db.notifications.find(n => n.type === 'application' && n.shiftId === live.id && n.text.startsWith(emp.name + ' '))
+                const appNote  = appNotif ? (appNotif.text.match(/— Hinweis: „(.+)“/) || appNotif.text.match(/— Hinweis: "(.+)"/))?.[1] : null
                 return (
-                  <div key={eid} style={S.applicantRow}>
+                  <div key={eid} style={{ ...S.applicantRow, flexDirection:'column', alignItems:'stretch', marginBottom:4 }}>
+                    <div style={{ display:'flex', alignItems:'center', gap:8 }}>
                     <div style={{ ...S.empAvatar, background:ec.color+'33', color:ec.color }}>{emp.avatar}</div>
                     <div style={S.applicantInfo}>
                       <div style={S.applicantName}>{emp.name}</div>
                       {isUnavail && <span style={S.unavailWarn}>⚠️ Abwesend</span>}
                     </div>
+                    </div>
+                    {appNote && (
+                      <div style={{ marginTop:4, padding:'4px 8px', background:'#FFF8EC', borderRadius:6, border:'1px solid #E8C54744', fontSize:11, color:'#7B5EA7' }}>
+                        💬 <em>{appNote}</em>
+                      </div>
+                    )}
                   </div>
                 )
               })}
-              {live.applicants.length > 2 && (
+              {live.applicants.length > 3 && (
                 <div style={{ fontSize:11, color:'#aaa', textAlign:'center', marginTop:4 }}>
-                  +{live.applicants.length - 2} weitere → Zuweisen
+                  +{live.applicants.length - 3} weitere → Zuweisen
                 </div>
               )}
             </div>
@@ -881,7 +907,7 @@ ${dayBlocks || '<p style="color:#aaa;text-align:center;padding:20px">Keine Schic
       const noteVal = eventStart.trim() ? `Beginn Veranstaltung: ${eventStart.trim()}` : ''
       const shifts = slots.map(s => ({ date, label, time: s.time, category: s.cat, room, note: noteVal }))
       await db.addShiftsBulk(shifts, db.employees)
-      setShowBulkShift(false)
+      setSlots([])  // nur Slots leeren, Modal bleibt offen
       showToast(`${shifts.length} Schicht${shifts.length > 1 ? 'en' : ''} erstellt ✓`)
     }
 
@@ -1008,7 +1034,7 @@ ${dayBlocks || '<p style="color:#aaa;text-align:center;padding:20px">Keine Schic
             onChange={e=>setForm({...form,note:e.target.value})} />
           <div style={S.modalActions}>
             <button style={S.cancelBtn} onClick={()=>setEditShift(null)}>Abbrechen</button>
-            <button style={S.confirmBtn} onClick={async()=>{ await db.updateShift(form.id,form); setEditShift(null); showToast('Schicht gespeichert ✓') }}>Speichern</button>
+            <button style={S.confirmBtn} onClick={async()=>{ await db.updateShift(form.id,form,editShift); setEditShift(null); showToast('Schicht gespeichert ✓') }}>Speichern</button>
           </div>
         </div>
       </div>
@@ -1086,7 +1112,7 @@ ${dayBlocks || '<p style="color:#aaa;text-align:center;padding:20px">Keine Schic
             </button>
             {showNotifs && <NotifPanel/>}
           </div>
-          <button style={S.logoutBtn} onClick={()=>{ setCurrentAccount(null); setShowNotifs(false) }}>↩</button>
+          <button style={S.logoutBtn} onClick={()=>{ try{localStorage.removeItem('sp_account')}catch{} ; setCurrentAccount(null); setShowNotifs(false) }}>↩</button>
         </div>
       </header>
 
@@ -1477,9 +1503,20 @@ ${dayBlocks || '<p style="color:#aaa;text-align:center;padding:20px">Keine Schic
                                             {isMe ? '⭐ Du' : emp.name}
                                           </span>
                                         </div>
-                                      ) : (
-                                        <span style={{ fontSize:11, color:'#C8960A', background:'#FFF8EC', padding:'2px 8px', borderRadius:8, border:'1px solid #E8C54744' }}>offen</span>
-                                      )}
+                                      ) : (() => {
+                                        const canApply = empCategories.includes(s.category)
+                                        const hasApplied = s.applicants.includes(activeEmployee.id)
+                                        const alreadyAssignedToday = db.shifts.some(x => x.date === date && x.assigned === activeEmployee.id)
+                                        if (!canApply) return <span style={{ fontSize:11, color:'#C8960A', background:'#FFF8EC', padding:'2px 8px', borderRadius:8, border:'1px solid #E8C54744' }}>offen</span>
+                                        if (hasApplied) return <span style={{ fontSize:11, color:'#2A9D6E', background:'#EDF7F0', padding:'2px 8px', borderRadius:8, border:'1px solid #2A9D6E44' }}>✓ Beworben</span>
+                                        if (alreadyAssignedToday) return <span style={{ fontSize:11, color:'#aaa', padding:'2px 8px', borderRadius:8 }}>Eingeteilt</span>
+                                        return (
+                                          <button style={{ fontSize:11, color:'#fff', background:cat.color, padding:'4px 10px', borderRadius:8, border:'none', cursor:'pointer', fontFamily:'inherit', fontWeight:600 }}
+                                            onClick={e => { e.stopPropagation(); setApplyModal({ shift: s }) }}>
+                                            Bewerben
+                                          </button>
+                                        )
+                                      })()}
                                     </div>
                                   )
                                 })}

@@ -42,6 +42,12 @@ export default function useData() {
         setNotifications(no.data.map(mapNotif))
         setUnavailable((un.data || []).map(mapUnavail))
         setRoomHeadings((rh.data || []).map(mapHeading))
+      // Auto-delete shifts older than 14 days
+      const cutoff = new Date()
+      cutoff.setDate(cutoff.getDate() - 14)
+      const cutoffStr = cutoff.toISOString().slice(0, 10)
+      await supabase.from('shifts').delete().lt('date', cutoffStr)
+
       } catch (e) { setError(e.message) }
       finally { setLoading(false) }
     }
@@ -112,13 +118,17 @@ export default function useData() {
     return accounts.find(a => a.employeeId === recipientId || a.id === String(recipientId))?.email || null
   }
 
-  const pushNotif = async (recipientId, type, text, shiftId = null, emailData = null) => {
+  // pushNotif: sendMail=true to also send email, false for app-only
+  const pushNotif = async (recipientId, type, text, shiftId = null, emailData = null, sendMail = false) => {
     await supabase.from('notifications').insert({
       id: Date.now() + (Math.random() * 10000 | 0),
       recipient_id: recipientId, type, text,
       shift_id: shiftId, read: false, ts: new Date().toISOString(),
     })
-    if (emailData) { const email = getEmail(recipientId); if (email) sendEmail(email, type, emailData) }
+    if (sendMail && emailData) {
+      const email = getEmail(recipientId)
+      if (email) sendEmail(email, type, emailData)
+    }
   }
 
   const markAllRead = async (rId) => {
@@ -150,7 +160,7 @@ export default function useData() {
       .filter(e => (e.categories || []).includes(s.category))
       .map(e => pushNotif(e.id, 'new_shift',
         `Neue Schicht: ${s.label} (${cat.label}) am ${fmtShort(s.date)}`, id,
-        { employeeName: e.name, shiftLabel: s.label, shiftDate: fmtShort(s.date), shiftTime: s.time, shiftIcon: cat.icon, category: cat.label, room: room?.name || '' }
+        null, false  // app-only, no email for new shifts
       ))
     ).catch(e => console.warn('Notification error:', e))
   }
@@ -181,23 +191,52 @@ export default function useData() {
       for (const e of allEmployees.filter(e => (e.categories || []).includes(s.category))) {
         notifPromises.push(pushNotif(e.id, 'new_shift',
           `Neue Schicht: ${s.label} (${cat.label}) am ${fmtShort(s.date)}`, id,
-          { employeeName: e.name, shiftLabel: s.label, shiftDate: fmtShort(s.date), shiftTime: s.time, shiftIcon: cat.icon, category: cat.label, room: room?.name || '' }
+          null, false  // app-only, no email for new shifts
         ))
       }
     }
     Promise.all(notifPromises).catch(e => console.warn('Notification error:', e))
   }
 
-  const updateShift = async (shiftId, u) => {
+  const updateShift = async (shiftId, u, oldShift = null) => {
     const { error } = await supabase.from('shifts').update({
       date: u.date, label: u.label, time: u.time,
       category: u.category, room: u.room || null, assigned: u.assigned ?? null,
       note: u.note || '',
     }).eq('id', shiftId)
     if (error) throw error
+
+    // Notify assigned employee if time or date changed
+    if (oldShift && u.assigned) {
+      const timeChanged = oldShift.time !== u.time || oldShift.date !== u.date
+      const wasUnassigned = !oldShift.assigned && u.assigned
+      if (timeChanged && !wasUnassigned) {
+        const emp = employees.find(e => e.id === u.assigned)
+        const cat = CATEGORIES[u.category]
+        await pushNotif(u.assigned, 'shift_changed',
+          `Deine Schicht "${u.label}" am ${fmtShort(u.date)} wurde geändert: ${u.time}`,
+          shiftId,
+          { employeeName: emp?.name || '', shiftLabel: u.label, shiftDate: fmtShort(u.date), shiftTime: u.time, shiftIcon: cat.icon, category: cat.label, room: '' },
+          true  // send email to employee on time change
+        )
+      }
+    }
   }
 
-  const deleteShift = async (id) => {
+  const deleteShift = async (id, shift = null) => {
+    // Notify assigned employee that shift is cancelled (with email)
+    if (shift?.assigned) {
+      const emp = employees.find(e => e.id === shift.assigned)
+      const cat = CATEGORIES[shift.category]
+      if (emp) {
+        await pushNotif(shift.assigned, 'shift_cancelled',
+          `Deine Schicht "${shift.label}" am ${fmtShort(shift.date)} wurde abgesagt!`,
+          null,
+          { employeeName: emp.name, shiftLabel: shift.label, shiftDate: fmtShort(shift.date), shiftTime: shift.time, shiftIcon: cat.icon, category: cat.label, room: '' },
+          true  // send email on cancellation
+        )
+      }
+    }
     await supabase.from('notifications').delete().eq('shift_id', id)
     await supabase.from('shifts').delete().eq('id', id)
   }
@@ -208,8 +247,9 @@ export default function useData() {
     const cat  = CATEGORIES[shift.category]
     const room = rooms.find(r => r.id === shift.room)
     await pushNotif(empId, 'assigned',
-      `Du wurdest für „${shift.label}" am ${fmtShort(shift.date)} eingeteilt!`, shiftId,
-      { employeeName: emp?.name || '', shiftLabel: shift.label, shiftDate: fmtShort(shift.date), shiftTime: shift.time, shiftIcon: cat.icon, category: cat.label, room: room?.name || '' }
+      `Du wurdest für "${shift.label}" am ${fmtShort(shift.date)} eingeteilt!`, shiftId,
+      { employeeName: emp?.name || '', shiftLabel: shift.label, shiftDate: fmtShort(shift.date), shiftTime: shift.time, shiftIcon: cat.icon, category: cat.label, room: room?.name || '' },
+      true  // send email to employee
     )
   }
 
@@ -232,7 +272,8 @@ export default function useData() {
       CHEF_ID, 'declined',
       `${employee.name} hat die Schicht "${shift.label}" am ${fmtShort(shift.date)} abgelehnt!`,
       shiftId,
-      { employeeName: employee.name, shiftLabel: shift.label, shiftDate: fmtShort(shift.date), shiftTime: shift.time, shiftIcon: cat.icon, category: cat.label, room: rooms.find(r => r.id === shift.room)?.name || '' }
+      { employeeName: employee.name, shiftLabel: shift.label, shiftDate: fmtShort(shift.date), shiftTime: shift.time, shiftIcon: cat.icon, category: cat.label, room: rooms.find(r => r.id === shift.room)?.name || '' },
+      true  // send email to chef on decline
     )
   }
 
@@ -243,8 +284,8 @@ export default function useData() {
     const room = rooms.find(r => r.id === shift.room)
     const noteText = note?.trim() ? ` — Hinweis: „${note.trim()}"` : ''
     await pushNotif(CHEF_ID, 'application',
-      `${employee.name} hat sich auf „${shift.label}" am ${fmtShort(shift.date)} beworben${noteText}`, shiftId,
-      { employeeName: employee.name, shiftLabel: shift.label, shiftDate: fmtShort(shift.date), shiftTime: shift.time, shiftIcon: cat.icon, category: cat.label, room: room?.name || '' }
+      `${employee.name} hat sich auf "${shift.label}" am ${fmtShort(shift.date)} beworben${noteText}`, shiftId,
+      null, false  // app-only for chef, no email on applications
     )
   }
 
