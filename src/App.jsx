@@ -436,6 +436,10 @@ ${dayBlocks || '<p style="color:#aaa;text-align:center;padding:20px">Keine Schic
                 </div>
                 {isAssigned ? (
                   <button style={S.unassignBtn} onClick={async () => { await db.unassignEmployee(live.id); showToast('Einteilung rückgängig'); setAssignShift(null) }}>↩ Entfernen</button>
+                ) : shiftsThisDay > 0 ? (
+                  <button style={{ ...S.assignBtn, borderColor:'#ccc', color:'#ccc', padding:'6px 12px', fontSize:12, cursor:'not-allowed' }} disabled>
+                    Eingeteilt
+                  </button>
                 ) : (
                   <button style={{ ...S.assignBtn, borderColor: cat.color, color: cat.color, padding:'6px 12px', fontSize:12 }}
                     onClick={async () => { await db.assignEmployee(live.id, emp.id, live); showToast(`${emp.name} eingeteilt ✓`); setAssignShift(null) }}>
@@ -1244,7 +1248,17 @@ ${dayBlocks || '<p style="color:#aaa;text-align:center;padding:20px">Keine Schic
                             <div style={S.empCatBadges}>
                               {(emp.categories||[]).map(c=>{ const cat=CATEGORIES[c]; return cat?<span key={c} style={{ ...S.catBadge, fontSize:10, background:cat.color+'22', color:cat.color }}>{cat.icon}</span>:null })}
                             </div>
-                            <div style={{ fontSize:10, color:'#aaa' }}>{db.shifts.filter(s=>s.assigned===emp.id&&s.date>=today).length} Schicht(en)</div>
+                            {(() => {
+                              const monthStr = today.slice(0,7) // YYYY-MM
+                              const thisMonth = db.shifts.filter(s => s.assigned === emp.id && s.date.startsWith(monthStr)).length
+                              const future    = db.shifts.filter(s => s.assigned === emp.id && s.date >= today).length
+                              return (
+                                <div style={{ fontSize:10, color:'#aaa', display:'flex', flexDirection:'column', gap:1, alignItems:'center' }}>
+                                  <span>{future} kommend</span>
+                                  <span style={{ color:'#C8960A', fontWeight:600 }}>{thisMonth}× diesen Monat</span>
+                                </div>
+                              )
+                            })()}
                           </div>
                         )
                       })}
