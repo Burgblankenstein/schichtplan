@@ -66,6 +66,9 @@ export default function App() {
   const [applyModal,      setApplyModal]      = useState(null) // { shift } — employee apply with note
   const [showAllDates,    setShowAllDates]    = useState({}) // { [date]: bool } for open shifts per day
   const [selectedDayOverview, setSelectedDayOverview] = useState(null) // date string for employee day view
+  const [showHoursEntry,    setShowHoursEntry]    = useState(false)  // Stunden-Tab
+  const [showHoursReminder, setShowHoursReminder] = useState(false)  // Reminder-Banner
+  const [editWorkHour,      setEditWorkHour]       = useState(null)   // { wh } bearbeiten
 
   const [bulkForm, setBulkForm] = useState({
     date:'', template:'ala_carte', customLabel:'', time:'17:00 – 23:00', room:'',
@@ -855,6 +858,14 @@ ${dayBlocks || '<p style="color:#aaa;text-align:center;padding:20px">Keine Schic
               {acc.email && <span style={{ color:'#6B8FB5', fontSize:11 }}>· {acc.email}</span>}
             </div>
           </div>
+          {acc.role==='employee' && (
+            <button
+              title={acc.canTrackHours ? 'Stundeneintragung deaktivieren' : 'Stundeneintragung aktivieren'}
+              style={{ ...S.accEditBtn, background: acc.canTrackHours ? '#2A9D6E22' : '#F5F3EE', color: acc.canTrackHours ? '#2A9D6E' : '#aaa', border: `1px solid ${acc.canTrackHours ? '#2A9D6E44' : '#E0DBD0'}`, marginRight:2 }}
+              onClick={async () => { await db.setCanTrackHours(acc.id, !acc.canTrackHours); showToast(acc.canTrackHours ? 'Stundeneintragung deaktiviert' : 'Stundeneintragung aktiviert ✓') }}>
+              ⏱️
+            </button>
+          )}
           <button style={S.accEditBtn} onClick={()=>{ setEditAccount({...acc, _empCats: emp?.categories || []}); setAccError('') }}>✏️</button>
           <button style={S.accDeleteBtn} onClick={async()=>{
             try { await db.deleteAccount(acc, db.accounts); showToast('Account gelöscht') }
@@ -1085,6 +1096,309 @@ ${dayBlocks || '<p style="color:#aaa;text-align:center;padding:20px">Keine Schic
     )
   }
 
+  /* ═══════════ WORK HOUR MODAL (Stunden eintragen / bearbeiten) ═══════════ */
+  const WorkHourModal = ({ wh, onClose }) => {
+    const shift = wh.shiftId ? db.shifts.find(s => s.id === wh.shiftId) : null
+    // Startzeit aus Schicht übernehmen wenn vorhanden
+    const shiftStartDefault = shift ? shift.time.split(' – ')[0].trim() : ''
+    const [startTime, setStartTime] = useState(wh.startTime || shiftStartDefault)
+    const [endTime,   setEndTime]   = useState(wh.endTime   || '')
+    const [breakMin,  setBreakMin]  = useState(String(wh.breakMin || 0))
+    const [note,      setNote]      = useState(wh.note      || '')
+    const [saving,    setSaving]    = useState(false)
+
+    const hours = db.calcHours(startTime, endTime, Number(breakMin) || 0)
+
+    const handleSave = async () => {
+      if (!startTime) { showToast('Bitte Startzeit eingeben'); return }
+      setSaving(true)
+      try {
+        const data = { startTime, endTime: endTime || null, breakMin: Number(breakMin) || 0, note, date: wh.date, shiftId: wh.shiftId || null }
+        if (wh.id) {
+          await db.updateWorkHour(wh.id, data)
+          showToast('Stunden aktualisiert ✓')
+        } else {
+          await db.addWorkHour(wh.employeeId, data)
+          showToast('Stunden eingetragen ✓')
+        }
+        onClose()
+      } catch(e) { showToast(e.message) }
+      finally { setSaving(false) }
+    }
+
+    return (
+      <div style={S.overlay} onClick={onClose}>
+        <div style={S.modal} onClick={e => e.stopPropagation()}>
+          <div style={S.modalHandle}/>
+          <h3 style={S.modalTitle}>⏱️ {wh.id ? 'Stunden bearbeiten' : 'Stunden eintragen'}</h3>
+
+          <div style={{ background:'#F5F3EE', borderRadius:10, padding:'10px 14px', marginBottom:14 }}>
+            <div style={{ fontSize:14, fontWeight:700, color:'#1a1a1a' }}>{fmtLong(wh.date)}</div>
+            {shift && <div style={{ fontSize:12, color:'#888', marginTop:2 }}>📋 {shift.label} · {shift.time}</div>}
+          </div>
+
+          <label style={S.label}>Arbeitsbeginn</label>
+          <input style={S.input} type="time" value={startTime} onChange={e => setStartTime(e.target.value)} />
+          {shiftStartDefault && !wh.startTime && (
+            <div style={{ fontSize:11, color:'#aaa', marginTop:3 }}>
+              💡 Aus Schichtplan übernommen: {shiftStartDefault} — kann korrigiert werden
+            </div>
+          )}
+
+          <label style={{ ...S.label, marginTop:12 }}>Arbeitsende (manuell eintragen)</label>
+          <input style={S.input} type="time" value={endTime} onChange={e => setEndTime(e.target.value)} />
+
+          <label style={{ ...S.label, marginTop:12 }}>Pause (Minuten)</label>
+          <input style={{ ...S.input }} type="number" min="0" max="120" value={breakMin}
+            onChange={e => setBreakMin(e.target.value)} placeholder="0" />
+
+          {hours !== null && (
+            <div style={{ background:'#EDF7F0', border:'1px solid #2A9D6E44', borderRadius:8, padding:'10px 14px', marginTop:10, fontSize:14, fontWeight:700, color:'#2A9D6E' }}>
+              ⏱️ Netto-Arbeitszeit: {hours.toFixed(2).replace('.', ',')} Stunden ({Math.floor(hours)}h {Math.round((hours%1)*60)}min)
+            </div>
+          )}
+
+          <label style={{ ...S.label, marginTop:12 }}>Notiz (optional)</label>
+          <input style={S.input} value={note} onChange={e => setNote(e.target.value)} placeholder="z.B. früher gegangen" />
+
+          <div style={S.modalActions}>
+            <button style={S.cancelBtn} onClick={onClose}>Abbrechen</button>
+            <button style={{ ...S.confirmBtn, opacity: saving ? 0.7 : 1 }} onClick={handleSave} disabled={saving}>
+              {saving ? 'Wird gespeichert…' : 'Speichern'}
+            </button>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  /* ═══════════ MITARBEITER: MEINE STUNDEN TAB ═══════════ */
+  const MeinStundenTab = ({ employeeId }) => {
+    const myHours = db.workHours.filter(wh => wh.employeeId === employeeId)
+      .sort((a,b) => b.date.localeCompare(a.date))
+
+    // Schichten ohne Stundeneintrag (letzte 30 Tage)
+    const thirtyDaysAgo = toDS(new Date(Date.now() - 30 * 24 * 60 * 60 * 1000))
+    const pendingShifts = db.shifts.filter(s =>
+      s.assigned === employeeId &&
+      s.date < today &&
+      s.date >= thirtyDaysAgo &&
+      !db.workHours.some(wh => wh.employeeId === employeeId && wh.date === s.date)
+    ).sort((a,b) => b.date.localeCompare(a.date))
+
+    return (
+      <div>
+        {/* Ausstehende Einträge */}
+        {pendingShifts.length > 0 && (
+          <div style={{ marginBottom:20 }}>
+            <h3 style={S.subTitle}>⚠️ Noch ausstehend ({pendingShifts.length})</h3>
+            <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
+              {pendingShifts.map(s => (
+                <div key={s.id} style={{ display:'flex', alignItems:'center', gap:12, padding:'12px 14px', background:'#FFF8EC', border:'1px solid #E8C54744', borderRadius:10 }}>
+                  <div style={{ flex:1 }}>
+                    <div style={{ fontSize:13, fontWeight:700, color:'#1a1a1a' }}>{fmtLong(s.date)}</div>
+                    <div style={{ fontSize:12, color:'#888' }}>📋 {s.label} · {s.time}</div>
+                  </div>
+                  <button style={{ background:'#C8960A', color:'#fff', border:'none', borderRadius:8, padding:'7px 12px', fontSize:12, fontWeight:700, cursor:'pointer', fontFamily:'inherit' }}
+                    onClick={() => setEditWorkHour({ employeeId, date: s.date, shiftId: s.id, startTime:'', endTime:'', breakMin:0, note:'' })}>
+                    + Eintragen
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Bereits eingetragene Stunden */}
+        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:12 }}>
+          <h3 style={{ ...S.subTitle, marginBottom:0 }}>✓ Eingetragene Stunden</h3>
+          <button style={S.addBtn} onClick={() => setEditWorkHour({ employeeId, date: today, shiftId: null, startTime:'', endTime:'', breakMin:0, note:'' })}>
+            + Manuell
+          </button>
+        </div>
+
+        {myHours.length === 0 && pendingShifts.length === 0 && (
+          <div style={{ ...S.empty, textAlign:'center', padding:32 }}>
+            <div style={{ fontSize:32, marginBottom:8 }}>⏱️</div>
+            <div style={{ fontSize:14, color:'#aaa' }}>Noch keine Stunden eingetragen</div>
+          </div>
+        )}
+
+        <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
+          {myHours.map(wh => {
+            const hours = db.calcHours(wh.startTime, wh.endTime, wh.breakMin)
+            const shift = wh.shiftId ? db.shifts.find(s => s.id === wh.shiftId) : null
+            return (
+              <div key={wh.id} style={{ display:'flex', alignItems:'center', gap:12, padding:'12px 14px', background:'#FFFDF8', border:'1px solid #E0DBD0', borderRadius:10 }}>
+                <div style={{ flex:1, minWidth:0 }}>
+                  <div style={{ fontSize:13, fontWeight:700, color:'#1a1a1a' }}>{fmtLong(wh.date)}</div>
+                  <div style={{ fontSize:12, color:'#888', marginTop:1 }}>
+                    🕐 {wh.startTime}{wh.endTime ? ` – ${wh.endTime}` : ' (Ende fehlt)'}
+                    {wh.breakMin > 0 && ` · Pause: ${wh.breakMin}min`}
+                  </div>
+                  {shift && <div style={{ fontSize:11, color:'#6B8FB5', marginTop:1 }}>📋 {shift.label}</div>}
+                  {wh.note && <div style={{ fontSize:11, color:'#7B5EA7', marginTop:1 }}>📌 {wh.note}</div>}
+                </div>
+                <div style={{ textAlign:'right', flexShrink:0 }}>
+                  {hours !== null
+                    ? <div style={{ fontSize:16, fontWeight:700, color:'#2A9D6E' }}>{hours.toFixed(1).replace('.', ',')}h</div>
+                    : <div style={{ fontSize:12, color:'#C8960A', fontWeight:700 }}>⚠️ Ende fehlt</div>
+                  }
+                  <button style={{ ...S.accEditBtn, marginTop:4 }}
+                    onClick={() => setEditWorkHour({ ...wh })}>✏️</button>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      </div>
+    )
+  }
+
+  /* ═══════════ CHEF: STUNDEN ÜBERSICHT TAB ═══════════ */
+  const ChefStundenTab = () => {
+    const [filterEmp,   setFilterEmp]   = useState('all')
+    const [filterMonth, setFilterMonth] = useState(today.slice(0,7)) // YYYY-MM
+
+    const months = [...new Set(db.workHours.map(wh => wh.date.slice(0,7)))].sort().reverse()
+    if (!months.includes(filterMonth) && months.length > 0 && !months.includes(today.slice(0,7))) {
+      // nichts tun
+    }
+
+    const filtered = db.workHours.filter(wh =>
+      (filterEmp === 'all' || String(wh.employeeId) === String(filterEmp)) &&
+      wh.date.startsWith(filterMonth)
+    ).sort((a,b) => b.date.localeCompare(a.date))
+
+    // Summen pro Mitarbeiter
+    const empSums = {}
+    filtered.forEach(wh => {
+      const h = db.calcHours(wh.startTime, wh.endTime, wh.breakMin)
+      if (!empSums[wh.employeeId]) empSums[wh.employeeId] = { total: 0, count: 0 }
+      empSums[wh.employeeId].count++
+      if (h !== null) empSums[wh.employeeId].total += h
+    })
+
+    const exportXLS = () => {
+      // Einfaches CSV das Excel direkt öffnen kann (UTF-8 BOM für Umlaute)
+      const BOM = '﻿'
+      const header = ['Datum', 'Mitarbeiter', 'Schicht', 'Beginn', 'Ende', 'Pause (min)', 'Netto-Stunden', 'Notiz']
+      const rows = filtered.map(wh => {
+        const emp   = db.employees.find(e => e.id === wh.employeeId)
+        const shift = wh.shiftId ? db.shifts.find(s => s.id === wh.shiftId) : null
+        const hours = db.calcHours(wh.startTime, wh.endTime, wh.breakMin)
+        return [
+          wh.date,
+          emp?.name || wh.employeeId,
+          shift?.label || '',
+          wh.startTime,
+          wh.endTime || '',
+          wh.breakMin || 0,
+          hours !== null ? hours.toFixed(2).replace('.', ',') : '',
+          wh.note || '',
+        ]
+      })
+      const csv = BOM + [header, ...rows].map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(';')).join('\n')
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `stunden_${filterMonth}.csv`
+      a.click()
+      URL.revokeObjectURL(url)
+      showToast('CSV exportiert ✓ (in Excel öffnen)')
+    }
+
+    const totalHours = Object.values(empSums).reduce((s, e) => s + e.total, 0)
+
+    return (
+      <div>
+        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:16, flexWrap:'wrap', gap:8 }}>
+          <h2 style={S.sectionTitle}>⏱️ Stundenübersicht</h2>
+          <button style={{ ...S.addBtn, background:'#2A9D6E' }} onClick={exportXLS}>📊 XLS exportieren</button>
+        </div>
+
+        {/* Filter */}
+        <div style={{ display:'flex', gap:8, flexWrap:'wrap', marginBottom:14 }}>
+          <select style={{ ...S.select, flex:'0 0 auto', width:'auto', padding:'7px 10px', fontSize:12 }}
+            value={filterMonth} onChange={e => setFilterMonth(e.target.value)}>
+            {/* Aktuellen Monat immer anzeigen */}
+            {[today.slice(0,7), ...months.filter(m => m !== today.slice(0,7))].map(m => (
+              <option key={m} value={m}>{m}</option>
+            ))}
+          </select>
+          <button style={filterEmp==='all'?S.filterActive:S.filterBtn} onClick={() => setFilterEmp('all')}>Alle MA</button>
+          {db.employees.map(e => (
+            <button key={e.id} style={String(filterEmp)===String(e.id)?S.filterActive:S.filterBtn}
+              onClick={() => setFilterEmp(String(e.id))}>{e.name}</button>
+          ))}
+        </div>
+
+        {/* Summen-Karten */}
+        {Object.keys(empSums).length > 0 && (
+          <div style={{ display:'flex', gap:10, flexWrap:'wrap', marginBottom:16 }}>
+            {Object.entries(empSums).map(([eid, s]) => {
+              const emp = db.employees.find(e => String(e.id) === String(eid))
+              if (!emp) return null
+              return (
+                <div key={eid} style={{ background:'#FFFDF8', border:'1px solid #E0DBD0', borderRadius:10, padding:'10px 14px', minWidth:120, flex:1 }}>
+                  <div style={{ fontSize:11, color:'#aaa', marginBottom:4 }}>{emp.name}</div>
+                  <div style={{ fontSize:20, fontWeight:700, color:'#2A9D6E' }}>{s.total.toFixed(1).replace('.', ',')}h</div>
+                  <div style={{ fontSize:11, color:'#bbb' }}>{s.count} Einträge</div>
+                </div>
+              )
+            })}
+            <div style={{ background:'#C8960A22', border:'1px solid #C8960A44', borderRadius:10, padding:'10px 14px', minWidth:120, flex:1 }}>
+              <div style={{ fontSize:11, color:'#C8960A', marginBottom:4, fontWeight:700 }}>GESAMT</div>
+              <div style={{ fontSize:20, fontWeight:700, color:'#C8960A' }}>{totalHours.toFixed(1).replace('.', ',')}h</div>
+              <div style={{ fontSize:11, color:'#bbb' }}>{filtered.length} Einträge</div>
+            </div>
+          </div>
+        )}
+
+        {filtered.length === 0 && (
+          <div style={{ ...S.empty, textAlign:'center', padding:32 }}>
+            <div style={{ fontSize:32, marginBottom:8 }}>⏱️</div>
+            <div style={{ fontSize:14, color:'#aaa' }}>Keine Einträge für diesen Zeitraum</div>
+          </div>
+        )}
+
+        {/* Detail-Liste */}
+        <div style={{ display:'flex', flexDirection:'column', gap:6 }}>
+          {filtered.map(wh => {
+            const emp   = db.employees.find(e => e.id === wh.employeeId)
+            const shift = wh.shiftId ? db.shifts.find(s => s.id === wh.shiftId) : null
+            const hours = db.calcHours(wh.startTime, wh.endTime, wh.breakMin)
+            return (
+              <div key={wh.id} style={{ display:'flex', alignItems:'center', gap:12, padding:'10px 14px', background:'#FFFDF8', border:'1px solid #E0DBD0', borderRadius:10 }}>
+                <div style={{ flex:1, minWidth:0 }}>
+                  <div style={{ display:'flex', gap:8, alignItems:'center', flexWrap:'wrap' }}>
+                    <span style={{ fontSize:13, fontWeight:700, color:'#1a1a1a' }}>{fmtLong(wh.date)}</span>
+                    {emp && <span style={{ fontSize:11, background:'#F5F3EE', borderRadius:6, padding:'1px 7px', color:'#555' }}>{emp.name}</span>}
+                  </div>
+                  <div style={{ fontSize:12, color:'#888', marginTop:1 }}>
+                    🕐 {wh.startTime}{wh.endTime ? ` – ${wh.endTime}` : ' (Ende fehlt)'}
+                    {wh.breakMin > 0 && ` · Pause: ${wh.breakMin}min`}
+                  </div>
+                  {shift && <div style={{ fontSize:11, color:'#6B8FB5', marginTop:1 }}>📋 {shift.label}</div>}
+                  {wh.note && <div style={{ fontSize:11, color:'#7B5EA7', marginTop:1 }}>📌 {wh.note}</div>}
+                </div>
+                <div style={{ textAlign:'right', flexShrink:0 }}>
+                  {hours !== null
+                    ? <div style={{ fontSize:16, fontWeight:700, color:'#2A9D6E' }}>{hours.toFixed(1).replace('.', ',')}h</div>
+                    : <div style={{ fontSize:12, color:'#C8960A', fontWeight:700 }}>⚠️ Ende fehlt</div>
+                  }
+                  <button style={{ ...S.deleteBtn, marginTop:4 }}
+                    onClick={async () => { if(confirm('Eintrag löschen?')) { await db.deleteWorkHour(wh.id); showToast('Eintrag gelöscht') } }}>✕</button>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      </div>
+    )
+  }
+
   /* ═══════════ MAIN RENDER ═══════════ */
   return (
     <div style={S.root} onClick={()=>{ if(showNotifs) setShowNotifs(false) }}>
@@ -1150,6 +1464,7 @@ ${dayBlocks || '<p style="color:#aaa;text-align:center;padding:20px">Keine Schic
                 )}
               </button>
               <button style={chefSubTab==='accounts'    ?S.tabActive:S.tab} onClick={()=>setChefSubTab('accounts')}>🔑 Accounts</button>
+              <button style={chefSubTab==='stunden'    ?S.tabActive:S.tab} onClick={()=>setChefSubTab('stunden')}>⏱️ Stunden</button>
             </div>
 
             {chefSubTab==='schichten' && (
@@ -1269,6 +1584,7 @@ ${dayBlocks || '<p style="color:#aaa;text-align:center;padding:20px">Keine Schic
               </>
             )}
             {chefSubTab==='accounts'&&<AccountsTab/>}
+            {chefSubTab==='stunden'&&<ChefStundenTab/>}
 
             {/* ── Offene Bewerbungen ── */}
             {chefSubTab==='bewerbungen' && (() => {
@@ -1302,6 +1618,9 @@ ${dayBlocks || '<p style="color:#aaa;text-align:center;padding:20px">Keine Schic
               <button style={mitTab==='tagesuebersicht' ?S.tabActive:S.tab} onClick={()=>setMitTab('tagesuebersicht')}>👥 Tagesübersicht</button>
               <button style={mitTab==='kalender'    ?S.tabActive:S.tab} onClick={()=>setMitTab('kalender')}>🗓️ Kalender</button>
               <button style={mitTab==='konto'       ?S.tabActive:S.tab} onClick={()=>setMitTab('konto')}>👤 Mein Konto</button>
+              {currentAccount?.canTrackHours && (
+                <button style={mitTab==='stunden'?S.tabActive:S.tab} onClick={()=>setMitTab('stunden')}>⏱️ Meine Stunden</button>
+              )}
             </div>
 
             {(() => {
@@ -1331,6 +1650,31 @@ ${dayBlocks || '<p style="color:#aaa;text-align:center;padding:20px">Keine Schic
                       ))}
                     </div>
                   </div>
+
+                  {/* ── Stunden-Reminder ── */}
+                  {currentAccount?.canTrackHours && (() => {
+                    // Schichten der letzten 7 Tage ohne Stundeneintrag
+                    const sevenDaysAgo = toDS(new Date(Date.now() - 7 * 24 * 60 * 60 * 1000))
+                    const pendingShifts = db.shifts.filter(s =>
+                      s.assigned === activeEmployee?.id &&
+                      s.date < today &&
+                      s.date >= sevenDaysAgo &&
+                      !db.workHours.some(wh => wh.employeeId === activeEmployee.id && wh.date === s.date)
+                    )
+                    if (pendingShifts.length === 0) return null
+                    return (
+                      <div style={{ background:'#FFF8EC', border:'1px solid #E8C54744', borderRadius:12, padding:'12px 16px', marginBottom:14, display:'flex', alignItems:'center', justifyContent:'space-between', gap:12 }}>
+                        <div>
+                          <div style={{ fontSize:13, fontWeight:700, color:'#C8960A', marginBottom:2 }}>⏱️ Stunden noch nicht eingetragen!</div>
+                          <div style={{ fontSize:12, color:'#888' }}>{pendingShifts.length} Schicht{pendingShifts.length>1?'en':''} warten auf deine Zeitangaben.</div>
+                        </div>
+                        <button style={{ background:'#C8960A', color:'#fff', border:'none', borderRadius:8, padding:'8px 14px', fontSize:12, fontWeight:700, cursor:'pointer', fontFamily:'inherit', flexShrink:0 }}
+                          onClick={() => setMitTab('stunden')}>
+                          Jetzt eintragen →
+                        </button>
+                      </div>
+                    )
+                  })()}
 
                   {/* ── Mein Schichtplan ── */}
                   {mitTab==='schichtplan' && (
@@ -1417,6 +1761,7 @@ ${dayBlocks || '<p style="color:#aaa;text-align:center;padding:20px">Keine Schic
 
                   {mitTab==='kalender'&&<Calendar monday={calMit} setMonday={setCalMit} calIsChef={false} />}
                   {mitTab==='konto' && <MeinKontoTab />}
+                  {mitTab==='stunden' && currentAccount?.canTrackHours && <MeinStundenTab employeeId={activeEmployee?.id} />}
 
                   {/* ── Tagesübersicht ── */}
                   {mitTab==='tagesuebersicht' && (() => {
@@ -1554,6 +1899,7 @@ ${dayBlocks || '<p style="color:#aaa;text-align:center;padding:20px">Keine Schic
       {editAccount    && <EditAccountModal/>}
       {assignShift    && <AssignShiftModal/>}
       {applyModal     && <ApplyModal/>}
+      {editWorkHour   && <WorkHourModal wh={editWorkHour} onClose={() => setEditWorkHour(null)} />}
 
       {/* Räume Modal */}
       {showManageRooms && (
