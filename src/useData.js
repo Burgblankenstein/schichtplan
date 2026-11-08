@@ -6,10 +6,11 @@ import { mkInitials, fmtShort, CHEF_ID, CATEGORIES } from './constants'
 const mapShift    = r => ({ id: r.id, date: r.date, label: r.label, time: r.time, category: r.category, room: r.room || '', applicants: r.applicants || [], assigned: r.assigned, note: r.note || '', declinedBy: r.declined_by || [] })
 const mapEmployee = r => ({ id: r.id, name: r.name, categories: r.categories || [r.category].filter(Boolean), avatar: r.avatar })
 const mapRoom     = r => ({ id: r.id, name: r.name, icon: r.icon })
-const mapAccount  = r => ({ id: r.id, name: r.name, role: r.role, employeeId: r.employee_id, email: r.email || '' })
+const mapAccount  = r => ({ id: r.id, name: r.name, role: r.role, employeeId: r.employee_id, email: r.email || '', canTrackHours: r.can_track_hours || false })
 const mapNotif    = r => ({ id: r.id, recipientId: r.recipient_id, type: r.type, text: r.text, shiftId: r.shift_id, read: r.read, ts: r.ts })
 const mapUnavail  = r => ({ id: r.id, employeeId: r.employee_id, date: r.date, note: r.note || '' })
 const mapHeading  = r => ({ id: r.id, date: r.date, roomId: r.room_id, heading: r.heading })
+const mapWorkHour = r => ({ id: r.id, employeeId: r.employee_id, shiftId: r.shift_id, date: r.date, startTime: r.start_time, endTime: r.end_time || '', breakMin: r.break_min || 0, note: r.note || '', createdAt: r.created_at })
 
 export default function useData() {
   const [shifts,        setShifts]        = useState([])
@@ -19,20 +20,22 @@ export default function useData() {
   const [notifications, setNotifications] = useState([])
   const [unavailable,   setUnavailable]   = useState([])
   const [roomHeadings,  setRoomHeadings]  = useState([])
+  const [workHours,     setWorkHours]     = useState([])
   const [loading,       setLoading]       = useState(true)
   const [error,         setError]         = useState(null)
 
   useEffect(() => {
     async function load() {
       try {
-        const [sh, em, rm, ac, no, un, rh] = await Promise.all([
+        const [sh, em, rm, ac, no, un, rh, wh] = await Promise.all([
           supabase.from('shifts').select('*').order('date'),
           supabase.from('employees').select('*').order('name'),
           supabase.from('rooms').select('*'),
-          supabase.from('accounts').select('id,name,role,employee_id,email').order('role'),
+          supabase.from('accounts').select('id,name,role,employee_id,email,can_track_hours').order('role'),
           supabase.from('notifications').select('*').order('ts', { ascending: false }),
           supabase.from('unavailable_days').select('*'),
           supabase.from('room_headings').select('*'),
+          supabase.from('work_hours').select('*').order('date', { ascending: false }),
         ])
         if (sh.error) throw sh.error
         setShifts(sh.data.map(mapShift))
@@ -42,6 +45,7 @@ export default function useData() {
         setNotifications(no.data.map(mapNotif))
         setUnavailable((un.data || []).map(mapUnavail))
         setRoomHeadings((rh.data || []).map(mapHeading))
+        setWorkHours((wh.data || []).map(mapWorkHour))
       // Auto-delete shifts older than 14 days
       const cutoff = new Date()
       cutoff.setDate(cutoff.getDate() - 14)
@@ -68,13 +72,15 @@ export default function useData() {
       supabase.channel('emp-ch').on('postgres_changes', { event:'*', schema:'public', table:'employees' }, () =>
         reload('employees', setEmployees, mapEmployee, '*', 'name')).subscribe(),
       supabase.channel('acc-ch').on('postgres_changes', { event:'*', schema:'public', table:'accounts' }, () =>
-        reload('accounts', setAccounts, mapAccount, 'id,name,role,employee_id,email', 'role')).subscribe(),
+        reload('accounts', setAccounts, mapAccount, 'id,name,role,employee_id,email,can_track_hours', 'role')).subscribe(),
       supabase.channel('room-ch').on('postgres_changes', { event:'*', schema:'public', table:'rooms' }, () =>
         reload('rooms', setRooms, mapRoom)).subscribe(),
       supabase.channel('unavail-ch').on('postgres_changes', { event:'*', schema:'public', table:'unavailable_days' }, () =>
         reload('unavailable_days', setUnavailable, mapUnavail)).subscribe(),
       supabase.channel('heading-ch').on('postgres_changes', { event:'*', schema:'public', table:'room_headings' }, () =>
         reload('room_headings', setRoomHeadings, mapHeading)).subscribe(),
+      supabase.channel('workhours-ch').on('postgres_changes', { event:'*', schema:'public', table:'work_hours' }, () =>
+        reload('work_hours', setWorkHours, mapWorkHour, '*', 'date', false)).subscribe(),
     ]
     return () => channels.forEach(c => supabase.removeChannel(c))
   }, [])
@@ -89,7 +95,7 @@ export default function useData() {
     const hashedInput = 'sha256:' + await sha256(password)
     const { data: rows } = await supabase
       .from('accounts')
-      .select('id,name,role,employee_id,email,password')
+      .select('id,name,role,employee_id,email,password,can_track_hours')
       .ilike('name', name.trim())
     const acc = rows?.[0]
     if (!acc) throw new Error('Name oder Passwort falsch.')
@@ -360,6 +366,11 @@ export default function useData() {
     }
   }
 
+  const setCanTrackHours = async (accId, value) => {
+    await supabase.from('accounts').update({ can_track_hours: value }).eq('id', accId)
+    setAccounts(prev => prev.map(a => a.id === accId ? { ...a, canTrackHours: value } : a))
+  }
+
   const deleteAccount = async (acc, allAccounts) => {
     if (acc.role === 'chef' && allAccounts.filter(a => a.role === 'chef').length <= 1)
       throw new Error('Mindestens ein Chef-Account erforderlich.')
@@ -381,8 +392,50 @@ export default function useData() {
     return roomHeadings.find(h => h.date === date && h.roomId === roomId)?.heading || ''
   }
 
+  /* ── WORK HOURS ── */
+  const addWorkHour = async (employeeId, data) => {
+    const id = Date.now() + (Math.random() * 10000 | 0)
+    const { error } = await supabase.from('work_hours').insert({
+      id,
+      employee_id: employeeId,
+      shift_id: data.shiftId || null,
+      date: data.date,
+      start_time: data.startTime,
+      end_time: data.endTime || null,
+      break_min: data.breakMin || 0,
+      note: data.note || '',
+    })
+    if (error) throw error
+    return id
+  }
+
+  const updateWorkHour = async (id, data) => {
+    const { error } = await supabase.from('work_hours').update({
+      start_time: data.startTime,
+      end_time: data.endTime || null,
+      break_min: data.breakMin || 0,
+      note: data.note || '',
+      updated_at: new Date().toISOString(),
+    }).eq('id', id)
+    if (error) throw error
+  }
+
+  const deleteWorkHour = async (id) => {
+    await supabase.from('work_hours').delete().eq('id', id)
+  }
+
+  // Hilfsfunktion: Netto-Stunden berechnen
+  const calcHours = (startTime, endTime, breakMin = 0) => {
+    if (!startTime || !endTime) return null
+    const [sh, sm] = startTime.split(':').map(Number)
+    const [eh, em] = endTime.split(':').map(Number)
+    let total = (eh * 60 + em) - (sh * 60 + sm) - (breakMin || 0)
+    if (total < 0) total += 24 * 60 // Mitternacht überbrücken
+    return total / 60
+  }
+
   return {
-    shifts, employees, rooms, accounts, notifications, unavailable, roomHeadings, loading, error,
+    shifts, employees, rooms, accounts, notifications, unavailable, roomHeadings, workHours, loading, error,
     login, markAllRead, clearNotif,
     addShift, addShiftsBulk, updateShift, updateShiftNote,
     deleteShift, assignEmployee, unassignEmployee, declineShift, changeRoom,
@@ -390,6 +443,7 @@ export default function useData() {
     addUnavailableDay, removeUnavailableDay,
     setRoomHeading, getRoomHeading,
     addRoom, deleteRoom,
-    addAccount, updateAccount, deleteAccount,
+    addAccount, updateAccount, deleteAccount, setCanTrackHours,
+    addWorkHour, updateWorkHour, deleteWorkHour, calcHours,
   }
 }
