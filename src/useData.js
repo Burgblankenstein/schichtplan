@@ -394,9 +394,7 @@ export default function useData() {
 
   /* ── WORK HOURS ── */
   const addWorkHour = async (employeeId, data) => {
-    const id = Date.now() + (Math.random() * 10000 | 0)
-    const { error } = await supabase.from('work_hours').insert({
-      id,
+    const { data: inserted, error } = await supabase.from('work_hours').insert({
       employee_id: employeeId,
       shift_id: data.shiftId || null,
       date: data.date,
@@ -404,9 +402,9 @@ export default function useData() {
       end_time: data.endTime || null,
       break_min: data.breakMin || 0,
       note: data.note || '',
-    })
+    }).select('id').single()
     if (error) throw error
-    return id
+    return inserted?.id
   }
 
   const updateWorkHour = async (id, data) => {
